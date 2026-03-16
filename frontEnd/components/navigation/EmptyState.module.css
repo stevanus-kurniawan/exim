@@ -1,0 +1,27 @@
+/* Design tokens only — design-tokens.json. Compact empty state. */
+
+.wrapper {
+  text-align: left;
+  padding: var(--spacing-4, 24px) var(--spacing-3, 16px);
+  background-color: var(--color-primitive-background-lighter, #fafafa);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-md, 8px);
+}
+
+.title {
+  font-size: var(--typography-fontSize-base, 16px);
+  font-weight: var(--typography-fontWeight-semibold, 600);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+  margin: 0 0 var(--spacing-2, 8px);
+}
+
+.description {
+  font-size: var(--typography-fontSize-small, 14px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  margin: 0 0 var(--spacing-3, 16px);
+  max-width: 360px;
+}
+
+.action {
+  margin-top: var(--spacing-3, 16px);
+}

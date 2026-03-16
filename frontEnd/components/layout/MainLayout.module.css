@@ -1,0 +1,25 @@
+/* Design tokens only — design-tokens.json. Natural page container: full width with padding, optional max-width left-aligned. */
+
+.main {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: var(--spacing-3, 16px) var(--spacing-4, 24px);
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .main {
+    padding: var(--spacing-4, 24px) var(--spacing-5, 32px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .main {
+    max-width: 1280px;
+    margin-right: auto;
+    margin-left: 0;
+    padding-left: var(--spacing-5, 32px);
+    padding-right: var(--spacing-5, 32px);
+  }
+}

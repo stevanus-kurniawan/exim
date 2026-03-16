@@ -1,0 +1,232 @@
+/**
+ * Shipment repository: database access only.
+ */
+
+import type { Pool } from "pg";
+import { getPool } from "../../../db/index.js";
+import type {
+  CreateShipmentDto,
+  UpdateShipmentDto,
+  ListShipmentsQuery,
+  ShipmentRow,
+} from "../dto/index.js";
+
+export class ShipmentRepository {
+  private get pool(): Pool {
+    return getPool();
+  }
+
+  async getNextShipmentNo(year: number): Promise<string> {
+    const prefix = `SHP-${year}-`;
+    const result = await this.pool.query<{ shipment_no: string }>(
+      `SELECT shipment_no FROM shipments WHERE shipment_no LIKE $1 ORDER BY shipment_no DESC LIMIT 1`,
+      [prefix + "%"]
+    );
+    const last = result.rows[0]?.shipment_no;
+    const nextNum = last ? parseInt(last.slice(prefix.length), 10) + 1 : 1;
+    return `${prefix}${String(nextNum).padStart(4, "0")}`;
+  }
+
+  private readonly selectColumns = `id, shipment_no, vendor_code, vendor_name, forwarder_code, forwarder_name, warehouse_code, warehouse_name,
+    incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
+    destination_port_code, destination_port_name, destination_port_country, etd, eta, current_status,
+    closed_at, close_reason, remarks, created_at, updated_at,
+    pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, bm`;
+
+  async create(dto: CreateShipmentDto, shipmentNo: string): Promise<ShipmentRow> {
+    const etd = dto.etd ? new Date(dto.etd) : null;
+    const eta = dto.eta ? new Date(dto.eta) : null;
+    const nopenDate = dto.nopen_date ? new Date(dto.nopen_date) : null;
+    const result = await this.pool.query<ShipmentRow>(
+      `INSERT INTO shipments (
+        shipment_no, vendor_code, vendor_name, forwarder_code, forwarder_name, warehouse_code, warehouse_name,
+        incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
+        destination_port_code, destination_port_name, destination_port_country, etd, eta, remarks,
+        pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, bm,
+        current_status, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, 'INITIATE_SHIPPING_DOCUMENT', NOW(), NOW())
+      RETURNING ${this.selectColumns}`,
+      [
+        shipmentNo,
+        dto.vendor_code ?? null,
+        dto.vendor_name ?? null,
+        dto.forwarder_code ?? null,
+        dto.forwarder_name ?? null,
+        dto.warehouse_code ?? null,
+        dto.warehouse_name ?? null,
+        dto.incoterm ?? null,
+        dto.shipment_method ?? null,
+        dto.origin_port_code ?? null,
+        dto.origin_port_name ?? null,
+        dto.origin_port_country ?? null,
+        dto.destination_port_code ?? null,
+        dto.destination_port_name ?? null,
+        dto.destination_port_country ?? null,
+        etd,
+        eta,
+        dto.remarks ?? null,
+        dto.pib_type ?? null,
+        dto.no_request_pib ?? null,
+        dto.nopen ?? null,
+        nopenDate,
+        dto.ship_by ?? null,
+        dto.bl_awb ?? null,
+        dto.insurance_no ?? null,
+        dto.coo ?? null,
+        dto.incoterm_amount ?? null,
+        dto.bm ?? null,
+      ]
+    );
+    if (!result.rows[0]) throw new Error("ShipmentRepository.create: no row returned");
+    return result.rows[0];
+  }
+
+  async findById(id: string): Promise<ShipmentRow | null> {
+    const result = await this.pool.query<ShipmentRow>(
+      `SELECT ${this.selectColumns} FROM shipments WHERE id = $1`,
+      [id]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findAll(query: ListShipmentsQuery): Promise<{ rows: ShipmentRow[]; total: number }> {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query.limit ?? 10));
+    const offset = (page - 1) * limit;
+    const conditions: string[] = ["1=1"];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    if (query.status) {
+      conditions.push(`s.current_status = $${idx++}`);
+      params.push(query.status);
+    }
+    if (query.supplier_name) {
+      conditions.push(`s.vendor_name ILIKE $${idx++}`);
+      params.push(`%${query.supplier_name}%`);
+    }
+    if (query.from_date) {
+      conditions.push(`s.created_at >= $${idx++}`);
+      params.push(query.from_date);
+    }
+    if (query.to_date) {
+      conditions.push(`s.created_at <= $${idx++}`);
+      params.push(query.to_date);
+    }
+    if (query.search) {
+      conditions.push(
+        `(s.shipment_no ILIKE $${idx} OR s.vendor_name ILIKE $${idx})`
+      );
+      params.push(`%${query.search}%`);
+      idx++;
+    }
+    if (query.po_number) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM shipment_po_mapping m
+        JOIN imported_po_intake i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+        WHERE m.shipment_id = s.id AND i.po_number ILIKE $${idx}
+      )`);
+      params.push(`%${query.po_number}%`);
+      idx++;
+    }
+
+    const where = conditions.join(" AND ");
+    const countResult = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM shipments s WHERE ${where}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
+
+    params.push(limit, offset);
+    const result = await this.pool.query<ShipmentRow>(
+      `SELECT s.id, s.shipment_no, s.vendor_code, s.vendor_name, s.forwarder_code, s.forwarder_name,
+        s.warehouse_code, s.warehouse_name, s.incoterm, s.shipment_method,
+        s.origin_port_code, s.origin_port_name, s.origin_port_country,
+        s.destination_port_code, s.destination_port_name, s.destination_port_country,
+        s.etd, s.eta, s.current_status, s.closed_at, s.close_reason, s.remarks, s.created_at, s.updated_at,
+        s.pib_type, s.no_request_pib, s.nopen, s.nopen_date, s.ship_by, s.bl_awb, s.insurance_no, s.coo,
+        s.incoterm_amount, s.bm
+       FROM shipments s WHERE ${where} ORDER BY s.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
+      params
+    );
+
+    return { rows: result.rows, total };
+  }
+
+  async update(id: string, dto: UpdateShipmentDto): Promise<ShipmentRow | null> {
+    const updates: string[] = ["updated_at = NOW()"];
+    const params: unknown[] = [];
+    let idx = 1;
+    if (dto.eta !== undefined) {
+      updates.push(`eta = $${idx++}`);
+      params.push(dto.eta ? new Date(dto.eta) : null);
+    }
+    if (dto.remarks !== undefined) {
+      updates.push(`remarks = $${idx++}`);
+      params.push(dto.remarks);
+    }
+    if (dto.pib_type !== undefined) {
+      updates.push(`pib_type = $${idx++}`);
+      params.push(dto.pib_type);
+    }
+    if (dto.no_request_pib !== undefined) {
+      updates.push(`no_request_pib = $${idx++}`);
+      params.push(dto.no_request_pib);
+    }
+    if (dto.nopen !== undefined) {
+      updates.push(`nopen = $${idx++}`);
+      params.push(dto.nopen);
+    }
+    if (dto.nopen_date !== undefined) {
+      updates.push(`nopen_date = $${idx++}`);
+      params.push(dto.nopen_date ? new Date(dto.nopen_date) : null);
+    }
+    if (dto.ship_by !== undefined) {
+      updates.push(`ship_by = $${idx++}`);
+      params.push(dto.ship_by);
+    }
+    if (dto.bl_awb !== undefined) {
+      updates.push(`bl_awb = $${idx++}`);
+      params.push(dto.bl_awb);
+    }
+    if (dto.insurance_no !== undefined) {
+      updates.push(`insurance_no = $${idx++}`);
+      params.push(dto.insurance_no);
+    }
+    if (dto.coo !== undefined) {
+      updates.push(`coo = $${idx++}`);
+      params.push(dto.coo);
+    }
+    if (dto.incoterm_amount !== undefined) {
+      updates.push(`incoterm_amount = $${idx++}`);
+      params.push(dto.incoterm_amount);
+    }
+    if (dto.bm !== undefined) {
+      updates.push(`bm = $${idx++}`);
+      params.push(dto.bm);
+    }
+    if (params.length === 0) return this.findById(id);
+    params.push(id);
+    const result = await this.pool.query<ShipmentRow>(
+      `UPDATE shipments SET ${updates.join(", ")} WHERE id = $${idx} RETURNING ${this.selectColumns}`,
+      params
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async close(id: string, reason: string | null): Promise<ShipmentRow | null> {
+    const result = await this.pool.query<ShipmentRow>(
+      `UPDATE shipments SET closed_at = NOW(), close_reason = $1, updated_at = NOW() WHERE id = $2 RETURNING ${this.selectColumns}`,
+      [reason, id]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async updateCurrentStatus(id: string, currentStatus: string): Promise<ShipmentRow | null> {
+    const result = await this.pool.query<ShipmentRow>(
+      `UPDATE shipments SET current_status = $1, updated_at = NOW() WHERE id = $2 RETURNING ${this.selectColumns}`,
+      [currentStatus, id]
+    );
+    return result.rows[0] ?? null;
+  }
+}

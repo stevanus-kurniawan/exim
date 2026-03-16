@@ -1,0 +1,61 @@
+/* Design tokens only — design-tokens.json. Cohesive toolbar: search + actions grouped. */
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  margin-bottom: var(--spacing-3, 16px);
+  padding: var(--spacing-3, 16px) 0;
+  border-bottom: 1px solid var(--color-primitive-border-light, #e0e0e0);
+}
+
+.left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  min-width: 0;
+  flex: 1;
+}
+
+.searchSlot {
+  flex: 1;
+  min-width: 0;
+  max-width: 360px;
+}
+
+.filtersSlot {
+  flex-shrink: 0;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  .bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-3, 16px);
+    padding-bottom: var(--spacing-3, 16px);
+  }
+
+  .left {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: none;
+  }
+
+  .searchSlot {
+    max-width: none;
+  }
+
+  .right {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}

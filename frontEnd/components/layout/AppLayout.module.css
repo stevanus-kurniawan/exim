@@ -1,0 +1,36 @@
+/* Design tokens only — design-tokens.json */
+
+.wrapper {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-primitive-background-lighter, #fafafa);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 40;
+  transition: opacity var(--animation-duration-base, 200ms) var(--animation-easing-default, ease-out);
+}
+
+@media (max-width: 1023px) {
+  .overlay {
+    display: block;
+  }
+}
+
+@media (min-width: 1024px) {
+  .overlay {
+    display: none !important;
+  }
+}

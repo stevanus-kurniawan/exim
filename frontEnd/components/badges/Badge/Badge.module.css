@@ -1,0 +1,33 @@
+/* Design tokens only — design-tokens.json */
+
+.badge {
+  display: inline-block;
+  padding: var(--spacing-1, 4px) var(--spacing-2, 8px);
+  font-size: var(--typography-fontSize-xs, 12px);
+  font-weight: var(--typography-fontWeight-medium, 500);
+  border-radius: var(--borderRadius-sm, 6px);
+  white-space: nowrap;
+}
+
+.default {
+  color: var(--color-semantic-primary-foreground, #ffffff);
+  background-color: var(--color-semantic-primary-default, #c43a31);
+}
+
+.success {
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+  background-color: var(--color-primitive-background-light, #f4f4f4);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+}
+
+.warning {
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+  background-color: var(--color-primitive-background-lighter, #fafafa);
+  border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
+}
+
+.neutral {
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  background-color: var(--color-primitive-background-lighter, #fafafa);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+}
