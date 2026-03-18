@@ -10,15 +10,19 @@ import {
   validateCloseShipmentBody,
   validateCouplePoBody,
   validateDecouplePoBody,
+  validateUpdatePoMappingBody,
+  validateUpdatePoLinesBody,
 } from "../validators/index.js";
 import { ShipmentService } from "../services/shipment.service.js";
 import { ShipmentRepository } from "../repositories/shipment.repository.js";
 import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping.repository.js";
+import { ShipmentPoLineReceivedRepository } from "../repositories/shipment-po-line-received.repository.js";
 import type { ListShipmentsQuery } from "../dto/index.js";
 
 const shipmentRepo = new ShipmentRepository();
 const mappingRepo = new ShipmentPoMappingRepository();
-const service = new ShipmentService(shipmentRepo, mappingRepo);
+const lineReceivedRepo = new ShipmentPoLineReceivedRepository();
+const service = new ShipmentService(shipmentRepo, mappingRepo, lineReceivedRepo);
 
 function parseListQuery(req: Request): ListShipmentsQuery {
   const q = req.query as Record<string, unknown>;
@@ -147,6 +151,46 @@ export async function listLinkedPos(req: Request, res: Response, next: NextFunct
       return;
     }
     sendSuccess(res, data.linked_pos);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function updatePoMapping(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const shipmentId = req.params.id as string;
+  const intakeId = req.params.intakeId as string;
+  const validation = validateUpdatePoMappingBody(req);
+  if (!validation.ok) {
+    sendError(res, "Validation error", { errors: validation.errors, statusCode: 400 });
+    return;
+  }
+  try {
+    const data = await service.updatePoMapping(shipmentId, intakeId, validation.data);
+    if (!data) {
+      sendError(res, "Shipment or linked PO not found", { statusCode: 404 });
+      return;
+    }
+    sendSuccess(res, data, { message: "Linked PO updated successfully" });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function updatePoLines(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const shipmentId = req.params.id as string;
+  const intakeId = req.params.intakeId as string;
+  const validation = validateUpdatePoLinesBody(req);
+  if (!validation.ok) {
+    sendError(res, "Validation error", { errors: validation.errors, statusCode: 400 });
+    return;
+  }
+  try {
+    const data = await service.updatePoLines(shipmentId, intakeId, validation.data.lines);
+    if (!data) {
+      sendError(res, "Shipment not found", { statusCode: 404 });
+      return;
+    }
+    sendSuccess(res, data, { message: "Received quantities updated successfully" });
   } catch (e) {
     next(e);
   }

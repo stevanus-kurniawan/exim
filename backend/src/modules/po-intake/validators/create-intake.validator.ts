@@ -46,6 +46,7 @@ export function validateCreateIntakeBody(
   if (typeof body?.delivery_location === "string") data.delivery_location = body.delivery_location.trim();
   if (typeof body?.incoterm_location === "string") data.incoterm_location = body.incoterm_location.trim();
   if (typeof body?.kawasan_berikat === "string") data.kawasan_berikat = body.kawasan_berikat.trim();
+  if (typeof body?.currency === "string") data.currency = body.currency.trim();
   const items = parseItems(body?.items);
   if (items && items.length > 0) data.items = items;
 

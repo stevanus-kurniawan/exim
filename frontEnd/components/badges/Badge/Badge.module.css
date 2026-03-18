@@ -7,6 +7,7 @@
   font-weight: var(--typography-fontWeight-medium, 500);
   border-radius: var(--borderRadius-sm, 6px);
   white-space: nowrap;
+  transition: opacity var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out);
 }
 
 .default {

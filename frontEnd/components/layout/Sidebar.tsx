@@ -13,7 +13,7 @@ export interface NavItem {
 
 const MAIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/po", label: "PO" },
+  { href: "/dashboard/po", label: "Purchase Order" },
   { href: "/dashboard/shipments", label: "Shipments" },
 ];
 

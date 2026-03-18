@@ -43,9 +43,12 @@ export interface CreateShipmentDto {
   coo?: string;
   incoterm_amount?: number;
   bm?: number;
+  bm_percentage?: number;
+  kawasan_berikat?: string;
 }
 
 export interface UpdateShipmentDto {
+  etd?: string;
   eta?: string;
   remarks?: string;
   pib_type?: string;
@@ -58,6 +61,19 @@ export interface UpdateShipmentDto {
   coo?: string;
   incoterm_amount?: number;
   bm?: number;
+  bm_percentage?: number;
+  origin_port_name?: string;
+  origin_port_country?: string;
+  forwarder_name?: string;
+  shipment_method?: string;
+  destination_port_name?: string;
+  destination_port_country?: string;
+  vendor_name?: string;
+  warehouse_name?: string;
+  incoterm?: string;
+  closed_at?: string;
+  close_reason?: string;
+  kawasan_berikat?: string;
 }
 
 export interface CloseShipmentDto {
@@ -110,6 +126,8 @@ export interface ShipmentRow {
   coo: string | null;
   incoterm_amount: number | null;
   bm: number | null;
+  bm_percentage: number | null;
+  kawasan_berikat: string | null;
 }
 
 export interface ShipmentListItem {
@@ -158,15 +176,22 @@ export interface ShipmentDetail {
   coo: string | null;
   incoterm_amount: number | null;
   bm: number | null;
+  bm_percentage: number | null;
+  kawasan_berikat: string | null;
   /** Total amount of all items (linked POs). Used for PPN/PPH/PDRI. */
   total_items_amount: number;
   /** PPN = 11% × total_items_amount */
   ppn: number;
   /** PPH = 2.5% × total_items_amount */
   pph: number;
-  /** PDRI = BM + PPN + PPH (BM is 0 when COO is null) */
+  /** PDRI = BM + PPN + PPH */
   pdri: number;
   linked_pos: LinkedPoSummary[];
+}
+
+export interface LinkedPoLineReceived {
+  item_id: string;
+  received_qty: number;
 }
 
 export interface LinkedPoSummary {
@@ -175,8 +200,12 @@ export interface LinkedPoSummary {
   plant: string | null;
   supplier_name: string;
   incoterm_location: string | null;
+  currency: string | null;
+  invoice_no: string | null;
+  currency_rate: number | null;
   coupled_at: string;
   coupled_by: string;
+  line_received: LinkedPoLineReceived[];
 }
 
 export interface CreateShipmentResponse {
@@ -240,4 +269,39 @@ export interface ShipmentPoMappingRow {
   decoupled_at: Date | null;
   decoupled_by: string | null;
   decouple_reason: string | null;
+}
+
+export interface ShipmentBidRow {
+  id: string;
+  shipment_id: string;
+  forwarder_name: string;
+  service_amount: number | null;
+  duration: string | null;
+  origin_port: string | null;
+  destination_port: string | null;
+  ship_via: string | null;
+  quotation_file_name: string | null;
+  quotation_storage_key: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CreateShipmentBidDto {
+  forwarder_name: string;
+  service_amount?: number;
+  duration?: string;
+  origin_port?: string;
+  destination_port?: string;
+  ship_via?: string;
+}
+
+export interface UpdateShipmentBidDto {
+  forwarder_name?: string;
+  service_amount?: number;
+  duration?: string;
+  origin_port?: string;
+  destination_port?: string;
+  ship_via?: string;
+  quotation_file_name?: string;
+  quotation_storage_key?: string;
 }

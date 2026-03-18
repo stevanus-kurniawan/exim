@@ -14,14 +14,14 @@
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: var(--spacing-2, 8px);
-  margin-bottom: var(--spacing-4, 24px);
+  gap: var(--spacing-4, 24px);
+  margin-bottom: var(--spacing-5, 32px);
 }
 
 @media (min-width: 768px) {
   .summaryGrid {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: var(--spacing-3, 16px);
+    gap: var(--spacing-4, 24px);
   }
 }
 
@@ -35,12 +35,13 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--spacing-2, 8px);
-  margin-bottom: var(--spacing-4, 24px);
-  padding: var(--spacing-3, 16px) var(--spacing-4, 24px);
+  gap: var(--spacing-3, 16px);
+  margin-bottom: var(--spacing-5, 32px);
+  padding: var(--spacing-4, 24px);
   background-color: var(--color-primitive-background-white, #ffffff);
   border: 1px solid var(--color-primitive-border-light, #e0e0e0);
-  border-radius: var(--borderRadius-md, 8px);
+  border-radius: var(--borderRadius-lg, 12px);
+  box-shadow: var(--elevation-none, none);
 }
 
 .quickActionsLabel {
@@ -59,8 +60,8 @@
   display: inline-flex;
   align-items: center;
   padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
-  font-size: var(--typography-fontSize-small, 14px);
-  font-weight: var(--typography-fontWeight-medium, 500);
+  font-size: var(--typography-fontSize-base, 16px);
+  font-weight: var(--typography-fontWeight-semibold, 600);
   color: var(--color-semantic-primary-foreground, #ffffff);
   background-color: var(--color-semantic-primary-default, #c43a31);
   border: none;
@@ -83,7 +84,7 @@
   display: inline-flex;
   align-items: center;
   padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
-  font-size: var(--typography-fontSize-small, 14px);
+  font-size: var(--typography-fontSize-base, 16px);
   font-weight: var(--typography-fontWeight-medium, 500);
   color: var(--color-semantic-secondary-foreground, #2b2b2b);
   background-color: var(--color-semantic-secondary-default, #f4f4f4);
@@ -91,7 +92,8 @@
   border-radius: var(--borderRadius-md, 8px);
   text-decoration: none;
   cursor: pointer;
-  transition: background-color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out);
+  transition: background-color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out),
+    border-color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out);
 }
 
 .btnSecondary:hover {
@@ -105,7 +107,7 @@
 }
 
 .recentSection {
-  margin-bottom: var(--spacing-4, 24px);
+  margin-bottom: var(--spacing-5, 32px);
 }
 
 .recentHeader {

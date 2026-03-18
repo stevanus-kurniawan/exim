@@ -31,3 +31,11 @@ a {
 a:hover {
   color: var(--color-semantic-primary-hover, #9e2c25);
 }
+
+/* Token-based utility for Suspense/loading fallbacks (no new tokens). */
+.utilLoadingFallback {
+  padding: var(--spacing-3, 16px);
+  text-align: center;
+  font-size: var(--typography-fontSize-small, 14px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}

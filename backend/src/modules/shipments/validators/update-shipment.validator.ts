@@ -25,10 +25,23 @@ export function validateUpdateShipmentBody(
       errors.push({ field: "eta", message: "ETA must be a valid date" });
     }
   }
+  const etdRaw = body?.etd;
+  if (etdRaw != null) {
+    if (typeof etdRaw !== "string" || !parseDate(etdRaw)) {
+      errors.push({ field: "etd", message: "ETD must be a valid date" });
+    }
+  }
+  const closedAtRaw = body?.closed_at;
+  if (closedAtRaw != null) {
+    if (typeof closedAtRaw !== "string" || !parseDate(closedAtRaw)) {
+      errors.push({ field: "closed_at", message: "Closed at must be a valid date" });
+    }
+  }
 
   if (errors.length > 0) return { ok: false, errors };
 
   const data: UpdateShipmentDto = {};
+  if (etdRaw != null && typeof etdRaw === "string") data.etd = etdRaw.trim();
   if (etaRaw != null && typeof etaRaw === "string") data.eta = etaRaw.trim();
   if (typeof body?.remarks === "string") data.remarks = body.remarks.trim();
   if (typeof body?.pib_type === "string") data.pib_type = body.pib_type.trim() || undefined;
@@ -52,6 +65,23 @@ export function validateUpdateShipmentBody(
     if (!Number.isFinite(n) || n < 0) errors.push({ field: "bm", message: "Must be a non-negative number" });
     else data.bm = n;
   }
+  if (body?.bm_percentage != null) {
+    const n = Number(body.bm_percentage);
+    if (!Number.isFinite(n) || n < 0 || n > 100) errors.push({ field: "bm_percentage", message: "BM percentage must be between 0 and 100" });
+    else data.bm_percentage = n;
+  }
+  if (typeof body?.origin_port_name === "string") data.origin_port_name = body.origin_port_name.trim() || undefined;
+  if (typeof body?.origin_port_country === "string") data.origin_port_country = body.origin_port_country.trim() || undefined;
+  if (typeof body?.forwarder_name === "string") data.forwarder_name = body.forwarder_name.trim() || undefined;
+  if (typeof body?.shipment_method === "string") data.shipment_method = body.shipment_method.trim() || undefined;
+  if (typeof body?.destination_port_name === "string") data.destination_port_name = body.destination_port_name.trim() || undefined;
+  if (typeof body?.destination_port_country === "string") data.destination_port_country = body.destination_port_country.trim() || undefined;
+  if (typeof body?.vendor_name === "string") data.vendor_name = body.vendor_name.trim() || undefined;
+  if (typeof body?.warehouse_name === "string") data.warehouse_name = body.warehouse_name.trim() || undefined;
+  if (typeof body?.incoterm === "string") data.incoterm = body.incoterm.trim() || undefined;
+  if (typeof body?.kawasan_berikat === "string") data.kawasan_berikat = body.kawasan_berikat.trim() || undefined;
+  if (closedAtRaw != null && typeof closedAtRaw === "string") data.closed_at = closedAtRaw.trim();
+  if (typeof body?.close_reason === "string") data.close_reason = body.close_reason.trim() || undefined;
 
   if (errors.length > 0) return { ok: false, errors };
 

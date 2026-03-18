@@ -3,7 +3,9 @@
 .wrapper {
   overflow-x: auto;
   border: 1px solid var(--color-primitive-border-light, #e0e0e0);
-  border-radius: var(--borderRadius-md, 8px);
+  border-radius: var(--borderRadius-lg, 12px);
+  background-color: var(--color-primitive-background-white, #ffffff);
+  box-shadow: var(--elevation-none, none);
 }
 
 .table {
@@ -14,11 +16,11 @@
 
 .thead {
   background-color: var(--color-primitive-background-lighter, #fafafa);
-  border-bottom: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-bottom: 2px solid var(--color-primitive-border-light, #e0e0e0);
 }
 
 .th {
-  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  padding: var(--spacing-3, 16px) var(--spacing-3, 16px);
   text-align: left;
   font-weight: var(--typography-fontWeight-semibold, 600);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
@@ -38,7 +40,7 @@
 }
 
 .td {
-  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  padding: var(--spacing-3, 16px) var(--spacing-3, 16px);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
 }
 

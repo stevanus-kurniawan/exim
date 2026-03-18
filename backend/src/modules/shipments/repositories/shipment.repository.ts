@@ -31,7 +31,7 @@ export class ShipmentRepository {
     incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
     destination_port_code, destination_port_name, destination_port_country, etd, eta, current_status,
     closed_at, close_reason, remarks, created_at, updated_at,
-    pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, bm`;
+    pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, bm, bm_percentage, kawasan_berikat`;
 
   async create(dto: CreateShipmentDto, shipmentNo: string): Promise<ShipmentRow> {
     const etd = dto.etd ? new Date(dto.etd) : null;
@@ -42,9 +42,9 @@ export class ShipmentRepository {
         shipment_no, vendor_code, vendor_name, forwarder_code, forwarder_name, warehouse_code, warehouse_name,
         incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
         destination_port_code, destination_port_name, destination_port_country, etd, eta, remarks,
-        pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, bm,
+        pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, bm, bm_percentage, kawasan_berikat,
         current_status, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, 'INITIATE_SHIPPING_DOCUMENT', NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, 'INITIATE_SHIPPING_DOCUMENT', NOW(), NOW())
       RETURNING ${this.selectColumns}`,
       [
         shipmentNo,
@@ -75,6 +75,8 @@ export class ShipmentRepository {
         dto.coo ?? null,
         dto.incoterm_amount ?? null,
         dto.bm ?? null,
+        dto.bm_percentage ?? null,
+        dto.kawasan_berikat ?? null,
       ]
     );
     if (!result.rows[0]) throw new Error("ShipmentRepository.create: no row returned");
@@ -145,7 +147,7 @@ export class ShipmentRepository {
         s.destination_port_code, s.destination_port_name, s.destination_port_country,
         s.etd, s.eta, s.current_status, s.closed_at, s.close_reason, s.remarks, s.created_at, s.updated_at,
         s.pib_type, s.no_request_pib, s.nopen, s.nopen_date, s.ship_by, s.bl_awb, s.insurance_no, s.coo,
-        s.incoterm_amount, s.bm
+        s.incoterm_amount, s.bm, s.bm_percentage, s.kawasan_berikat
        FROM shipments s WHERE ${where} ORDER BY s.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
       params
     );
@@ -157,6 +159,10 @@ export class ShipmentRepository {
     const updates: string[] = ["updated_at = NOW()"];
     const params: unknown[] = [];
     let idx = 1;
+    if (dto.etd !== undefined) {
+      updates.push(`etd = $${idx++}`);
+      params.push(dto.etd ? new Date(dto.etd) : null);
+    }
     if (dto.eta !== undefined) {
       updates.push(`eta = $${idx++}`);
       params.push(dto.eta ? new Date(dto.eta) : null);
@@ -204,6 +210,58 @@ export class ShipmentRepository {
     if (dto.bm !== undefined) {
       updates.push(`bm = $${idx++}`);
       params.push(dto.bm);
+    }
+    if (dto.bm_percentage !== undefined) {
+      updates.push(`bm_percentage = $${idx++}`);
+      params.push(dto.bm_percentage);
+    }
+    if (dto.origin_port_name !== undefined) {
+      updates.push(`origin_port_name = $${idx++}`);
+      params.push(dto.origin_port_name);
+    }
+    if (dto.origin_port_country !== undefined) {
+      updates.push(`origin_port_country = $${idx++}`);
+      params.push(dto.origin_port_country);
+    }
+    if (dto.forwarder_name !== undefined) {
+      updates.push(`forwarder_name = $${idx++}`);
+      params.push(dto.forwarder_name);
+    }
+    if (dto.shipment_method !== undefined) {
+      updates.push(`shipment_method = $${idx++}`);
+      params.push(dto.shipment_method);
+    }
+    if (dto.destination_port_name !== undefined) {
+      updates.push(`destination_port_name = $${idx++}`);
+      params.push(dto.destination_port_name);
+    }
+    if (dto.destination_port_country !== undefined) {
+      updates.push(`destination_port_country = $${idx++}`);
+      params.push(dto.destination_port_country);
+    }
+    if (dto.vendor_name !== undefined) {
+      updates.push(`vendor_name = $${idx++}`);
+      params.push(dto.vendor_name);
+    }
+    if (dto.warehouse_name !== undefined) {
+      updates.push(`warehouse_name = $${idx++}`);
+      params.push(dto.warehouse_name);
+    }
+    if (dto.incoterm !== undefined) {
+      updates.push(`incoterm = $${idx++}`);
+      params.push(dto.incoterm);
+    }
+    if (dto.kawasan_berikat !== undefined) {
+      updates.push(`kawasan_berikat = $${idx++}`);
+      params.push(dto.kawasan_berikat);
+    }
+    if (dto.closed_at !== undefined) {
+      updates.push(`closed_at = $${idx++}`);
+      params.push(dto.closed_at ? new Date(dto.closed_at) : null);
+    }
+    if (dto.close_reason !== undefined) {
+      updates.push(`close_reason = $${idx++}`);
+      params.push(dto.close_reason);
     }
     if (params.length === 0) return this.findById(id);
     params.push(id);

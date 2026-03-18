@@ -10,12 +10,14 @@ import { PoIntakeRepository } from "../repositories/po-intake.repository.js";
 import { ShipmentService } from "../../shipments/services/shipment.service.js";
 import { ShipmentRepository } from "../../shipments/repositories/shipment.repository.js";
 import { ShipmentPoMappingRepository } from "../../shipments/repositories/shipment-po-mapping.repository.js";
+import { UserRepository } from "../../auth/repositories/user.repository.js";
 import type { ListPoIntakeQuery } from "../dto/index.js";
 
 const repo = new PoIntakeRepository();
-const service = new PoIntakeService(repo);
-const shipmentRepo = new ShipmentRepository();
 const mappingRepo = new ShipmentPoMappingRepository();
+const userRepo = new UserRepository();
+const service = new PoIntakeService(repo, mappingRepo, userRepo);
+const shipmentRepo = new ShipmentRepository();
 const shipmentService = new ShipmentService(shipmentRepo, mappingRepo);
 
 function parseListQuery(req: Request): ListPoIntakeQuery {
@@ -100,7 +102,14 @@ export async function createShipment(req: Request, res: Response, next: NextFunc
       sendError(res, "PO intake is already grouped to a shipment", { statusCode: 409 });
       return;
     }
-    const created = await shipmentService.create({});
+    // Pre-fill shipment from PO: vendor/supplier, delivery location, incoterm, kawasan berikat
+    const createDto = {
+      vendor_name: intake.supplier_name ?? undefined,
+      warehouse_name: intake.delivery_location ?? undefined,
+      incoterm: intake.incoterm_location ?? undefined,
+      kawasan_berikat: intake.kawasan_berikat ?? undefined,
+    };
+    const created = await shipmentService.create(createDto);
     const shipment = await shipmentService.couplePo(created.id, [intakeId], userName);
     sendSuccess(
       res,

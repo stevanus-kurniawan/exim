@@ -28,9 +28,9 @@ export class PoIntakeRepository {
   async create(dto: CreatePoIntakeDto, intakeStatus: string): Promise<PoIntakeRow> {
     const result = await this.pool.query<PoIntakeRow>(
       `INSERT INTO imported_po_intake
-       (external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, intake_status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat,
+       (external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency, intake_status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
          intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
       [
         dto.external_id,
@@ -40,6 +40,7 @@ export class PoIntakeRepository {
         dto.delivery_location ?? null,
         dto.incoterm_location ?? null,
         dto.kawasan_berikat ?? null,
+        dto.currency ?? null,
         intakeStatus,
       ]
     );
@@ -69,7 +70,7 @@ export class PoIntakeRepository {
 
   async findById(id: string): Promise<PoIntakeRow | null> {
     const result = await this.pool.query<PoIntakeRow>(
-      `SELECT id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat,
+      `SELECT id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
         intake_status, taken_by_user_id, taken_at, created_at, updated_at
        FROM imported_po_intake WHERE id = $1`,
       [id]
@@ -131,7 +132,7 @@ export class PoIntakeRepository {
 
     params.push(limit, offset);
     const result = await this.pool.query<PoIntakeRow>(
-      `SELECT id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat,
+      `SELECT id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
         intake_status, taken_by_user_id, taken_at, created_at, updated_at
        FROM imported_po_intake WHERE ${where} ORDER BY created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
       params
@@ -144,7 +145,7 @@ export class PoIntakeRepository {
     const result = await this.pool.query<PoIntakeRow>(
       `UPDATE imported_po_intake SET intake_status = 'NOTIFIED', updated_at = NOW()
        WHERE id = $1 AND intake_status = 'NEW_PO_DETECTED'
-       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat,
+       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
          intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
       [id]
     );
@@ -155,7 +156,7 @@ export class PoIntakeRepository {
     const result = await this.pool.query<PoIntakeRow>(
       `UPDATE imported_po_intake SET intake_status = 'TAKEN_BY_EXIM', taken_by_user_id = $1, taken_at = NOW(), updated_at = NOW()
        WHERE id = $2
-       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat,
+       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
          intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
       [userId, id]
     );
@@ -166,7 +167,7 @@ export class PoIntakeRepository {
     const result = await this.pool.query<PoIntakeRow>(
       `UPDATE imported_po_intake SET intake_status = 'GROUPED_TO_SHIPMENT', updated_at = NOW()
        WHERE id = $1
-       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat,
+       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
          intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
       [id]
     );
@@ -178,7 +179,7 @@ export class PoIntakeRepository {
     const result = await this.pool.query<PoIntakeRow>(
       `UPDATE imported_po_intake SET intake_status = 'TAKEN_BY_EXIM', updated_at = NOW()
        WHERE id = $1 AND intake_status = 'GROUPED_TO_SHIPMENT'
-       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat,
+       RETURNING id, external_id, po_number, plant, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
          intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
       [id]
     );

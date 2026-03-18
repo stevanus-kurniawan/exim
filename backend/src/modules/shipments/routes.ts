@@ -1,13 +1,15 @@
 /**
- * Shipment routes. CRUD, status, timeline, couple/decouple PO.
+ * Shipment routes. CRUD, status, timeline, couple/decouple PO, bidding.
  */
 
 import { Router } from "express";
 import { authMiddleware } from "../auth/auth.middleware.js";
 import { requirePermission } from "../auth/rbac.middleware.js";
 import { PERMISSIONS } from "../../shared/rbac.js";
+import { uploadSingle } from "../../middlewares/upload.middleware.js";
 import * as shipmentController from "./controllers/shipment.controller.js";
 import * as statusController from "./controllers/shipment-status.controller.js";
+import * as bidController from "./controllers/shipment-bid.controller.js";
 
 export const shipmentRoutes = Router();
 
@@ -23,3 +25,12 @@ shipmentRoutes.get("/:id/status-summary", authMiddleware, requirePermission(PERM
 
 shipmentRoutes.post("/:id/couple-po", authMiddleware, requirePermission(PERMISSIONS.COUPLE_DECOUPLE_PO), shipmentController.couplePo);
 shipmentRoutes.post("/:id/decouple-po", authMiddleware, requirePermission(PERMISSIONS.COUPLE_DECOUPLE_PO), shipmentController.decouplePo);
+shipmentRoutes.patch("/:id/po/:intakeId", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), shipmentController.updatePoMapping);
+shipmentRoutes.patch("/:id/po/:intakeId/lines", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), shipmentController.updatePoLines);
+
+shipmentRoutes.get("/:id/bids", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), bidController.listBids);
+shipmentRoutes.post("/:id/bids", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), bidController.createBid);
+shipmentRoutes.put("/:id/bids/:bidId", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), bidController.updateBid);
+shipmentRoutes.delete("/:id/bids/:bidId", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), bidController.deleteBid);
+shipmentRoutes.post("/:id/bids/:bidId/quotation", authMiddleware, requirePermission(PERMISSIONS.UPLOAD_DOCUMENT), uploadSingle, bidController.uploadQuotation);
+shipmentRoutes.get("/:id/bids/:bidId/quotation", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), bidController.downloadQuotation);

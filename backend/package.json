@@ -10,7 +10,8 @@
     "migrate": "tsx src/db/run-migrations.ts",
     "migrate:prod": "node dist/db/run-migrations.js",
     "migrate:create": "echo 'Migration create script to be implemented' && exit 0",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "seed:prod": "node dist/db/seed.js"
   },
   "engines": {
     "node": ">=20"

@@ -20,6 +20,7 @@
   color: var(--color-semantic-primary-foreground, #ffffff);
   background-color: var(--color-semantic-primary-default, #c43a31);
   border: none;
+  font-weight: var(--typography-fontWeight-semibold, 600);
 }
 
 .primary:hover:not(:disabled) {

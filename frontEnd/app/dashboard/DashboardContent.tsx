@@ -11,6 +11,7 @@ import { listShipments } from "@/services/shipments-service";
 import { Card, StatsCard } from "@/components/cards";
 import { PageHeader, EmptyState } from "@/components/navigation";
 import { Badge } from "@/components/badges";
+import { IconBox, IconClock, IconShip, IconDocument, IconCheck } from "@/components/icons/KpiIcons";
 import { statusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
 import { isApiError } from "@/types/api";
 import type { ShipmentListItem } from "@/types/shipments";
@@ -69,34 +70,38 @@ export function DashboardContent() {
 
       <div className={styles.summaryGrid}>
         <StatsCard
-          label="New PO detected"
+          label="New Purchase Order detected"
           value={poCounts.newPoDetected}
           href="/dashboard/po?intake_status=NEW_PO_DETECTED"
-          aria-label="New PO detected"
+          icon={<IconBox />}
         />
         <StatsCard
           label="Awaiting assignment"
           value={poCounts.awaitingAssignment}
           href="/dashboard/po?intake_status=NOTIFIED"
           aria-label="Awaiting assignment"
+          icon={<IconClock />}
         />
         <StatsCard
           label="Active shipments"
           value={shipmentCounts.activeShipments}
           href="/dashboard/shipments"
           aria-label="Active shipments"
+          icon={<IconShip />}
         />
         <StatsCard
           label="Customs clearance"
           value={shipmentCounts.customsClearance}
           href="/dashboard/shipments?status=CUSTOMS_CLEARANCE"
           aria-label="Customs clearance"
+          icon={<IconDocument />}
         />
         <StatsCard
           label="Delivered"
           value={shipmentCounts.delivered}
           href="/dashboard/shipments?status=DELIVERED"
           aria-label="Delivered"
+          icon={<IconCheck />}
         />
       </div>
 
@@ -104,7 +109,7 @@ export function DashboardContent() {
         <span className={styles.quickActionsLabel}>Quick actions</span>
         <div className={styles.quickActionsButtons}>
           <Link href="/dashboard/po" className={styles.btnPrimary}>
-            View PO
+            View Purchase Order
           </Link>
           <Link href="/dashboard/shipments" className={styles.btnSecondary}>
             View shipments
@@ -123,7 +128,7 @@ export function DashboardContent() {
           <Card>
             <EmptyState
               title="No shipments yet"
-              description="POs can be grouped into shipments from the PO screen."
+              description="Purchase Orders can be grouped into shipments from the Purchase Order screen."
               action={
                 <Link href="/dashboard/po" className={styles.btnPrimary}>
                   View PO
@@ -138,7 +143,7 @@ export function DashboardContent() {
                 <li key={row.id}>
                   <Link href={`/dashboard/shipments/${row.id}`} className={styles.recentRow}>
                     <span className={styles.recentNumber}>{row.shipment_number}</span>
-                    <span className={styles.recentPo}>{row.linked_po_count ?? 0} PO(s)</span>
+                    <span className={styles.recentPo}>{row.linked_po_count ?? 0} Purchase Order(s)</span>
                     <span className={styles.recentSupplier}>{row.supplier_name ?? "—"}</span>
                     <Badge variant={statusToBadgeVariant(row.current_status)}>
                       {formatStatusLabel(row.current_status)}

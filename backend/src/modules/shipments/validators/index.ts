@@ -4,3 +4,7 @@ export { validateCloseShipmentBody } from "./close-shipment.validator.js";
 export { validateUpdateStatusBody } from "./update-status.validator.js";
 export { validateCouplePoBody } from "./couple-po.validator.js";
 export { validateDecouplePoBody } from "./decouple-po.validator.js";
+export { validateUpdatePoMappingBody } from "./update-po-mapping.validator.js";
+export { validateUpdatePoLinesBody } from "./update-po-lines.validator.js";
+export { validateCreateBidBody } from "./create-bid.validator.js";
+export { validateUpdateBidBody } from "./update-bid.validator.js";

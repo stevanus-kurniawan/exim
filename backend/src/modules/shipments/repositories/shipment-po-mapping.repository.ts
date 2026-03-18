@@ -12,6 +12,18 @@ export interface LinkedPoWithIntake {
   plant: string | null;
   supplier_name: string;
   incoterm_location: string | null;
+  currency: string | null;
+  invoice_no: string | null;
+  currency_rate: number | null;
+  coupled_at: Date;
+  coupled_by: string;
+}
+
+/** For PO detail: shipments linked to a given intake (PO). */
+export interface LinkedShipmentByIntake {
+  shipment_id: string;
+  shipment_number: string;
+  current_status: string;
   coupled_at: Date;
   coupled_by: string;
 }
@@ -24,12 +36,52 @@ export class ShipmentPoMappingRepository {
   /** Currently coupled mappings only (decoupled_at IS NULL). */
   async findActiveByShipmentId(shipmentId: string): Promise<LinkedPoWithIntake[]> {
     const result = await this.pool.query<LinkedPoWithIntake>(
-      `SELECT m.intake_id, i.po_number, i.plant, i.supplier_name, i.incoterm_location, m.coupled_at, m.coupled_by
+      `SELECT m.intake_id, i.po_number, i.plant, i.supplier_name, i.incoterm_location, i.currency,
+         m.invoice_no, m.currency_rate, m.coupled_at, m.coupled_by
        FROM shipment_po_mapping m
        JOIN imported_po_intake i ON i.id = m.intake_id
        WHERE m.shipment_id = $1 AND m.decoupled_at IS NULL
        ORDER BY m.coupled_at ASC`,
       [shipmentId]
+    );
+    return result.rows;
+  }
+
+  /** Update invoice_no and/or currency_rate for a coupled PO. */
+  async updateMapping(
+    shipmentId: string,
+    intakeId: string,
+    data: { invoice_no?: string | null; currency_rate?: number | null }
+  ): Promise<boolean> {
+    const updates: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+    if (data.invoice_no !== undefined) {
+      updates.push(`invoice_no = $${idx++}`);
+      params.push(data.invoice_no);
+    }
+    if (data.currency_rate !== undefined) {
+      updates.push(`currency_rate = $${idx++}`);
+      params.push(data.currency_rate);
+    }
+    if (updates.length === 0) return true;
+    params.push(shipmentId, intakeId);
+    const result = await this.pool.query(
+      `UPDATE shipment_po_mapping SET ${updates.join(", ")} WHERE shipment_id = $${idx} AND intake_id = $${idx + 1} AND decoupled_at IS NULL`,
+      params
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /** Shipments currently linked to this PO (intake). Used for PO detail page. */
+  async findActiveShipmentsByIntakeId(intakeId: string): Promise<LinkedShipmentByIntake[]> {
+    const result = await this.pool.query<LinkedShipmentByIntake>(
+      `SELECT m.shipment_id, s.shipment_no AS shipment_number, s.current_status, m.coupled_at, m.coupled_by
+       FROM shipment_po_mapping m
+       JOIN shipments s ON s.id = m.shipment_id
+       WHERE m.intake_id = $1 AND m.decoupled_at IS NULL
+       ORDER BY m.coupled_at ASC`,
+      [intakeId]
     );
     return result.rows;
   }

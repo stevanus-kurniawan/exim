@@ -2,10 +2,11 @@
 
 .wrapper {
   text-align: left;
-  padding: var(--spacing-4, 24px) var(--spacing-3, 16px);
-  background-color: var(--color-primitive-background-lighter, #fafafa);
+  padding: var(--spacing-5, 32px) var(--spacing-4, 24px);
+  background-color: var(--color-primitive-background-white, #ffffff);
   border: 1px solid var(--color-primitive-border-light, #e0e0e0);
-  border-radius: var(--borderRadius-md, 8px);
+  border-radius: var(--borderRadius-lg, 12px);
+  box-shadow: var(--elevation-none, none);
 }
 
 .title {

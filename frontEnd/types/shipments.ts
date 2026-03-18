@@ -2,14 +2,23 @@
  * Shipments API types — align with backend GET /shipments, GET /shipments/:id.
  */
 
+export interface LinkedPoLineReceived {
+  item_id: string;
+  received_qty: number;
+}
+
 export interface LinkedPoSummary {
   intake_id: string;
   po_number: string;
   plant: string | null;
   supplier_name: string;
   incoterm_location: string | null;
+  currency: string | null;
+  invoice_no: string | null;
+  currency_rate: number | null;
   coupled_at: string;
   coupled_by: string;
+  line_received: LinkedPoLineReceived[];
 }
 
 export interface ShipmentListItem {
@@ -58,13 +67,15 @@ export interface ShipmentDetail {
   coo: string | null;
   incoterm_amount: number | null;
   bm: number | null;
+  bm_percentage: number | null;
+  kawasan_berikat: string | null;
   /** Total amount of all items (linked POs). PPN/PPH/PDRI derived from this. */
   total_items_amount: number;
   /** PPN = 11% × total_items_amount */
   ppn: number;
   /** PPH = 2.5% × total_items_amount */
   pph: number;
-  /** PDRI = BM + PPN + PPH (BM is 0 when COO is null) */
+  /** PDRI = BM + PPN + PPH */
   pdri: number;
   linked_pos: LinkedPoSummary[];
 }
@@ -90,4 +101,19 @@ export interface ShipmentStatusSummaryData {
   current_status: string;
   previous_status: string | null;
   last_updated_at: string;
+}
+
+export interface ShipmentBid {
+  id: string;
+  shipment_id: string;
+  forwarder_name: string;
+  service_amount: number | null;
+  duration: string | null;
+  origin_port: string | null;
+  destination_port: string | null;
+  ship_via: string | null;
+  quotation_file_name: string | null;
+  quotation_storage_key: string | null;
+  created_at: string;
+  updated_at: string;
 }

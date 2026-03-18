@@ -4,7 +4,7 @@ import { LoginForm } from "./LoginForm";
 export default function LoginPage() {
   return (
     <main aria-label="Log in to EOS">
-      <Suspense fallback={<p style={{ padding: "1rem", textAlign: "center" }}>Loading…</p>}>
+      <Suspense fallback={<p className="utilLoadingFallback">Loading…</p>}>
         <LoginForm />
       </Suspense>
     </main>

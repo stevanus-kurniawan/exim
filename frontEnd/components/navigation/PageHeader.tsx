@@ -18,19 +18,25 @@ export function PageHeader({
   actions,
   subtitle,
 }: PageHeaderProps) {
+  const showTopRow = backHref || actions;
+
   return (
     <header className={styles.header}>
-      <div className={styles.top}>
-        {backHref && (
-          <Link href={backHref} className={styles.backLink}>
-            ← {backLabel}
-          </Link>
-        )}
-        <div className={styles.titleBlock}>
-          <h1 className={styles.title}>{title}</h1>
-          {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
+      {showTopRow && (
+        <div className={styles.topRow}>
+          {backHref ? (
+            <Link href={backHref} className={styles.backLink}>
+              ← {backLabel}
+            </Link>
+          ) : (
+            <span />
+          )}
+          {actions && <div className={styles.actions}>{actions}</div>}
         </div>
-        {actions && <div className={styles.actions}>{actions}</div>}
+      )}
+      <div className={styles.titleBlock}>
+        <h1 className={styles.title}>{title}</h1>
+        {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
       </div>
     </header>
   );

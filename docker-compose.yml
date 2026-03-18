@@ -38,7 +38,8 @@ services:
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       STORAGE_LOCAL_PATH: /app/uploads
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3002}
+      # Allow both localhost and 127.0.0.1 so login works from either URL
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3002,http://127.0.0.1:3002}
       ALLOW_ANY_EMAIL: ${ALLOW_ANY_EMAIL:-false}
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-energi-up.com}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3002}
@@ -49,8 +50,9 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@energi-up.com}
-      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      # Default dev admin so login works out of the box. Set empty in production.
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-ChangeMe123}
     ports:
       - "${BACKEND_PORT:-3003}:3003"
     volumes:

@@ -28,6 +28,7 @@ export interface CreatePoIntakeDto {
   delivery_location?: string;
   incoterm_location?: string;
   kawasan_berikat?: string;
+  currency?: string;
   items?: PoIntakeItemDto[];
 }
 
@@ -49,6 +50,7 @@ export interface PoIntakeRow {
   delivery_location: string | null;
   incoterm_location: string | null;
   kawasan_berikat: string | null;
+  currency: string | null;
   intake_status: string;
   taken_by_user_id: string | null;
   taken_at: Date | null;
@@ -90,8 +92,11 @@ export interface PoIntakeDetail {
   delivery_location: string | null;
   incoterm_location: string | null;
   kawasan_berikat: string | null;
+  currency: string | null;
   intake_status: string;
   taken_by_user_id: string | null;
+  /** Display name of user who took ownership (when taken_by_user_id is set). */
+  taken_by_name: string | null;
   taken_at: string | null;
   created_at: string;
   updated_at: string;
@@ -103,6 +108,20 @@ export interface PoIntakeDetail {
     unit: string | null;
     value: number | null;
     kurs: number | null;
+    /** Received quantity (from deliveries/shipments). When no source: 0. */
+    received_qty: number | null;
+    /** Remaining qty from PO perspective: max(0, qty - received_qty). */
+    remaining_qty: number | null;
+    /** When received > qty: percentage of over-receipt, e.g. ((received - qty) / qty) * 100. */
+    over_received_pct: number | null;
+  }[];
+  /** Shipments linked to this PO (deliveries interacting with this PO). */
+  linked_shipments: {
+    shipment_id: string;
+    shipment_number: string;
+    current_status: string;
+    coupled_at: string;
+    coupled_by: string;
   }[];
 }
 

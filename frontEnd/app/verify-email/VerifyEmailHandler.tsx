@@ -63,7 +63,7 @@ function VerifyEmailHandlerInner() {
 
 export function VerifyEmailHandler() {
   return (
-    <Suspense fallback={<p style={{ padding: "1rem", textAlign: "center" }}>Loading…</p>}>
+    <Suspense fallback={<p className="utilLoadingFallback">Loading…</p>}>
       <VerifyEmailHandlerInner />
     </Suspense>
   );

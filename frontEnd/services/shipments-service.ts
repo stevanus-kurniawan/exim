@@ -2,13 +2,14 @@
  * Shipments API — services layer. All shipment API calls go through here.
  */
 
-import { apiGet, apiPost, apiPatch, apiPut } from "./api-client";
+import { apiGet, apiPost, apiPatch, apiPut, apiDelete, apiRequest } from "./api-client";
 import type {
   ShipmentListItem,
   ShipmentDetail,
   ListShipmentsQuery,
   ShipmentTimelineEntry,
   ShipmentStatusSummaryData,
+  ShipmentBid,
 } from "@/types/shipments";
 import type { ApiResponse } from "@/types/api";
 
@@ -40,6 +41,7 @@ export async function getShipmentDetail(
 }
 
 export interface UpdateShipmentPayload {
+  etd?: string;
   eta?: string;
   remarks?: string;
   pib_type?: string;
@@ -52,6 +54,19 @@ export interface UpdateShipmentPayload {
   coo?: string;
   incoterm_amount?: number;
   bm?: number;
+  bm_percentage?: number;
+  origin_port_name?: string;
+  origin_port_country?: string;
+  forwarder_name?: string;
+  shipment_method?: string;
+  destination_port_name?: string;
+  destination_port_country?: string;
+  vendor_name?: string;
+  warehouse_name?: string;
+  incoterm?: string;
+  closed_at?: string;
+  close_reason?: string;
+  kawasan_berikat?: string;
 }
 
 export async function updateShipment(
@@ -101,4 +116,88 @@ export async function decouplePo(
 ): Promise<ApiResponse<unknown>> {
   return apiPost(`shipments/${shipmentId}/decouple-po`, { intake_id: intakeId, reason }, accessToken);
 }
+
+export async function listShipmentBids(
+  shipmentId: string,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentBid[]>> {
+  return apiGet<ShipmentBid[]>(`shipments/${shipmentId}/bids`, accessToken);
+}
+
+export interface CreateShipmentBidPayload {
+  forwarder_name: string;
+  service_amount?: number;
+  duration?: string;
+  origin_port?: string;
+  destination_port?: string;
+  ship_via?: string;
+}
+
+export async function createShipmentBid(
+  shipmentId: string,
+  payload: CreateShipmentBidPayload,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentBid>> {
+  return apiPost<ShipmentBid>(`shipments/${shipmentId}/bids`, payload, accessToken);
+}
+
+export interface UpdateShipmentBidPayload {
+  forwarder_name?: string;
+  service_amount?: number;
+  duration?: string;
+  origin_port?: string;
+  destination_port?: string;
+  ship_via?: string;
+}
+
+export async function updateShipmentBid(
+  shipmentId: string,
+  bidId: string,
+  payload: UpdateShipmentBidPayload,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentBid>> {
+  return apiPut<ShipmentBid>(`shipments/${shipmentId}/bids/${bidId}`, payload, accessToken);
+}
+
+export async function deleteShipmentBid(
+  shipmentId: string,
+  bidId: string,
+  accessToken: string | null
+): Promise<ApiResponse<{ id: string }>> {
+  return apiDelete(`shipments/${shipmentId}/bids/${bidId}`, accessToken);
+}
+
+export async function uploadShipmentBidQuotation(
+  shipmentId: string,
+  bidId: string,
+  file: File,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentBid>> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiRequest<ShipmentBid>(`shipments/${shipmentId}/bids/${bidId}/quotation`, {
+    method: "POST",
+    body: form,
+    accessToken,
+  });
+}
+
+export async function updateShipmentPoMapping(
+  shipmentId: string,
+  intakeId: string,
+  payload: { invoice_no?: string | null; currency_rate?: number | null },
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentDetail>> {
+  return apiPatch<ShipmentDetail>(`shipments/${shipmentId}/po/${intakeId}`, payload, accessToken);
+}
+
+export async function updateShipmentPoLines(
+  shipmentId: string,
+  intakeId: string,
+  lines: { item_id: string; received_qty: number }[],
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentDetail>> {
+  return apiPatch<ShipmentDetail>(`shipments/${shipmentId}/po/${intakeId}/lines`, { lines }, accessToken);
+}
+
 

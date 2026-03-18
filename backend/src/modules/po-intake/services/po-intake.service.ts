@@ -3,6 +3,8 @@
  */
 
 import { PoIntakeRepository } from "../repositories/po-intake.repository.js";
+import type { LinkedShipmentByIntake } from "../../shipments/repositories/shipment-po-mapping.repository.js";
+import type { UserRepository } from "../../auth/repositories/user.repository.js";
 import { AppError } from "../../../middlewares/errorHandler.js";
 import type {
   CreatePoIntakeDto,
@@ -29,7 +31,12 @@ function toListItem(row: PoIntakeRow): PoIntakeListItem {
   };
 }
 
-function toDetail(row: PoIntakeRow, items: PoIntakeItemRow[]): PoIntakeDetail {
+function toDetail(
+  row: PoIntakeRow,
+  items: PoIntakeItemRow[],
+  linkedShipments: LinkedShipmentByIntake[],
+  takenByName: string | null
+): PoIntakeDetail {
   return {
     id: row.id,
     external_id: row.external_id,
@@ -39,25 +46,48 @@ function toDetail(row: PoIntakeRow, items: PoIntakeItemRow[]): PoIntakeDetail {
     delivery_location: row.delivery_location,
     incoterm_location: row.incoterm_location,
     kawasan_berikat: row.kawasan_berikat,
+    currency: row.currency ?? null,
     intake_status: row.intake_status,
     taken_by_user_id: row.taken_by_user_id,
+    taken_by_name: takenByName,
     taken_at: row.taken_at ? row.taken_at.toISOString() : null,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
-    items: items.map((it) => ({
-      id: it.id,
-      line_number: it.line_number,
-      item_description: it.item_description,
-      qty: it.qty,
-      unit: it.unit,
-      value: it.value,
-      kurs: it.kurs,
+    items: items.map((it) => {
+      const qty = it.qty ?? 0;
+      const receivedQty = 0; // TODO: aggregate from delivery/shipment receipts when available
+      const remainingQty = Math.max(0, qty - receivedQty);
+      const overReceivedPct =
+        qty > 0 && receivedQty > qty ? ((receivedQty - qty) / qty) * 100 : null;
+      return {
+        id: it.id,
+        line_number: it.line_number,
+        item_description: it.item_description,
+        qty: it.qty,
+        unit: it.unit,
+        value: it.value,
+        kurs: it.kurs,
+        received_qty: receivedQty,
+        remaining_qty: remainingQty,
+        over_received_pct: overReceivedPct,
+      };
+    }),
+    linked_shipments: linkedShipments.map((s) => ({
+      shipment_id: s.shipment_id,
+      shipment_number: s.shipment_number,
+      current_status: s.current_status,
+      coupled_at: s.coupled_at.toISOString(),
+      coupled_by: s.coupled_by,
     })),
   };
 }
 
 export class PoIntakeService {
-  constructor(private readonly repo: PoIntakeRepository) {}
+  constructor(
+    private readonly repo: PoIntakeRepository,
+    private readonly mappingRepo?: { findActiveShipmentsByIntakeId(intakeId: string): Promise<LinkedShipmentByIntake[]> },
+    private readonly userRepo?: UserRepository
+  ) {}
 
   /** Create intake (ingestion or test-create). Prevents duplicate by external_id. */
   async create(dto: CreatePoIntakeDto, options?: { skipDuplicateCheck?: boolean }): Promise<CreatePoIntakeResponse> {
@@ -95,19 +125,33 @@ export class PoIntakeService {
     const row = await this.repo.findById(id);
     if (!row) return null;
     const items = await this.repo.findItemsByIntakeId(id);
-    return toDetail(row, items);
+    const linkedShipments = this.mappingRepo ? await this.mappingRepo.findActiveShipmentsByIntakeId(id) : [];
+    const takenByName = row.taken_by_user_id && this.userRepo
+      ? (await this.userRepo.findById(row.taken_by_user_id))?.name ?? null
+      : null;
+    return toDetail(row, items, linkedShipments, takenByName);
   }
 
   async takeOwnership(id: string, userId: string): Promise<PoIntakeDetail | null> {
     const row = await this.repo.findById(id);
     if (!row) throw new AppError("PO intake not found", 404);
     if (row.intake_status === "GROUPED_TO_SHIPMENT") {
-      throw new AppError("PO intake already grouped to a shipment", 409);
+      const linkedShipments = this.mappingRepo ? await this.mappingRepo.findActiveShipmentsByIntakeId(id) : [];
+      const allDelivered =
+        linkedShipments.length > 0 &&
+        linkedShipments.every((s) => s.current_status === "DELIVERED");
+      if (!allDelivered) {
+        throw new AppError("PO intake already grouped to a shipment", 409);
+      }
     }
     const updated = await this.repo.takeOwnership(id, userId);
     if (!updated) return null;
     const items = await this.repo.findItemsByIntakeId(id);
-    return toDetail(updated, items);
+    const linkedShipments = this.mappingRepo ? await this.mappingRepo.findActiveShipmentsByIntakeId(id) : [];
+    const takenByName = updated.taken_by_user_id && this.userRepo
+      ? (await this.userRepo.findById(updated.taken_by_user_id))?.name ?? null
+      : null;
+    return toDetail(updated, items, linkedShipments, takenByName);
   }
 
   /** Called by shipment service when coupling PO. */

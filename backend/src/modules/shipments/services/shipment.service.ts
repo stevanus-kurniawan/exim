@@ -4,6 +4,7 @@
 
 import { ShipmentRepository } from "../repositories/shipment.repository.js";
 import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping.repository.js";
+import { ShipmentPoLineReceivedRepository } from "../repositories/shipment-po-line-received.repository.js";
 import { PoIntakeRepository } from "../../po-intake/repositories/po-intake.repository.js";
 import { AppError } from "../../../middlewares/errorHandler.js";
 import type {
@@ -32,23 +33,33 @@ function toListItem(row: ShipmentRow, linkedPoCount?: number): ShipmentListItem 
   };
 }
 
-function toLinkedSummary(row: {
-  intake_id: string;
-  po_number: string;
-  plant: string | null;
-  supplier_name: string;
-  incoterm_location: string | null;
-  coupled_at: Date;
-  coupled_by: string;
-}): LinkedPoSummary {
+function toLinkedSummary(
+  row: {
+    intake_id: string;
+    po_number: string;
+    plant: string | null;
+    supplier_name: string;
+    incoterm_location: string | null;
+    currency: string | null;
+    invoice_no: string | null;
+    currency_rate: number | null;
+    coupled_at: Date;
+    coupled_by: string;
+  },
+  lineReceived: { item_id: string; received_qty: number }[] = []
+): LinkedPoSummary {
   return {
     intake_id: row.intake_id,
     po_number: row.po_number,
     plant: row.plant,
     supplier_name: row.supplier_name,
     incoterm_location: row.incoterm_location,
+    currency: row.currency ?? null,
+    invoice_no: row.invoice_no ?? null,
+    currency_rate: row.currency_rate ?? null,
     coupled_at: row.coupled_at.toISOString(),
     coupled_by: row.coupled_by,
+    line_received: lineReceived,
   };
 }
 
@@ -56,10 +67,10 @@ const PPN_RATE = 0.11;
 const PPH_RATE = 0.025;
 
 function toDetail(row: ShipmentRow, linkedPos: LinkedPoSummary[], totalItemsAmount: number): ShipmentDetail {
-  const bmDisplay = row.coo == null ? 0 : (row.bm ?? 0);
+  const bmAmount = row.bm ?? 0;
   const ppn = totalItemsAmount * PPN_RATE;
   const pph = totalItemsAmount * PPH_RATE;
-  const pdri = bmDisplay + ppn + pph;
+  const pdri = bmAmount + ppn + pph;
 
   return {
     id: row.id,
@@ -96,6 +107,8 @@ function toDetail(row: ShipmentRow, linkedPos: LinkedPoSummary[], totalItemsAmou
     coo: row.coo ?? null,
     incoterm_amount: row.incoterm_amount ?? null,
     bm: row.bm ?? null,
+    bm_percentage: row.bm_percentage ?? null,
+    kawasan_berikat: row.kawasan_berikat ?? null,
     total_items_amount: totalItemsAmount,
     ppn,
     pph,
@@ -107,7 +120,8 @@ function toDetail(row: ShipmentRow, linkedPos: LinkedPoSummary[], totalItemsAmou
 export class ShipmentService {
   constructor(
     private readonly repo: ShipmentRepository,
-    private readonly mappingRepo: ShipmentPoMappingRepository
+    private readonly mappingRepo: ShipmentPoMappingRepository,
+    private readonly lineReceivedRepo?: ShipmentPoLineReceivedRepository
   ) {}
 
   async create(dto: CreateShipmentDto): Promise<CreateShipmentResponse> {
@@ -136,9 +150,15 @@ export class ShipmentService {
     const row = await this.repo.findById(id);
     if (!row) return null;
     const linked = await this.mappingRepo.findActiveByShipmentId(id);
+    const linkedPos = await Promise.all(
+      linked.map(async (l) => {
+        const lines = this.lineReceivedRepo ? await this.lineReceivedRepo.findByShipmentAndIntake(id, l.intake_id) : [];
+        return toLinkedSummary(l, lines);
+      })
+    );
     const intakeIds = linked.map((l) => l.intake_id);
     const totalItemsAmount = await poIntakeRepo.getTotalItemsAmountForIntakeIds(intakeIds);
-    return toDetail(row, linked.map(toLinkedSummary), totalItemsAmount);
+    return toDetail(row, linkedPos, totalItemsAmount);
   }
 
   async update(id: string, dto: UpdateShipmentDto): Promise<ShipmentDetail | null> {
@@ -150,9 +170,15 @@ export class ShipmentService {
     const row = await this.repo.update(id, dto);
     if (!row) return null;
     const linked = await this.mappingRepo.findActiveByShipmentId(id);
+    const linkedPos = await Promise.all(
+      linked.map(async (l) => {
+        const lines = this.lineReceivedRepo ? await this.lineReceivedRepo.findByShipmentAndIntake(id, l.intake_id) : [];
+        return toLinkedSummary(l, lines);
+      })
+    );
     const intakeIds = linked.map((l) => l.intake_id);
     const totalItemsAmount = await poIntakeRepo.getTotalItemsAmountForIntakeIds(intakeIds);
-    return toDetail(row, linked.map(toLinkedSummary), totalItemsAmount);
+    return toDetail(row, linkedPos, totalItemsAmount);
   }
 
   async close(id: string, reason: string | null): Promise<void> {
@@ -188,5 +214,51 @@ export class ShipmentService {
     const updated = await this.mappingRepo.decouple(shipmentId, intakeId, decoupledBy, reason);
     if (!updated) throw new AppError("PO is not coupled to this shipment or already decoupled", 404);
     await poIntakeRepo.setBackToTaken(intakeId);
+  }
+
+  /** Update invoice_no and/or currency_rate for a linked PO. */
+  async updatePoMapping(
+    shipmentId: string,
+    intakeId: string,
+    data: { invoice_no?: string | null; currency_rate?: number | null }
+  ): Promise<ShipmentDetail | null> {
+    const shipment = await this.repo.findById(shipmentId);
+    if (!shipment) return null;
+    const updated = await this.mappingRepo.updateMapping(shipmentId, intakeId, data);
+    if (!updated) return null;
+    return this.getById(shipmentId);
+  }
+
+  /** Update received qty per line for a linked PO. Validates: total received across shipments ≤ 105% of PO line qty. */
+  async updatePoLines(
+    shipmentId: string,
+    intakeId: string,
+    lines: { item_id: string; received_qty: number }[]
+  ): Promise<ShipmentDetail | null> {
+    if (!this.lineReceivedRepo) throw new AppError("Line received repository not available", 500);
+    const shipment = await this.repo.findById(shipmentId);
+    if (!shipment) return null;
+    const isCoupled = await this.mappingRepo.isCoupled(shipmentId, intakeId);
+    if (!isCoupled) throw new AppError("PO is not coupled to this shipment", 404);
+    const poItems = await poIntakeRepo.findItemsByIntakeId(intakeId);
+    const poQtyByItem = new Map(poItems.map((i) => [i.id, i.qty ?? 0]));
+    const maxAllowed = 1.05; // 105%
+    for (const line of lines) {
+      const poQty = poQtyByItem.get(line.item_id) ?? 0;
+      const totalSoFar = await this.lineReceivedRepo.getTotalReceivedByIntakeItem(intakeId, line.item_id);
+      const currentForThisShipment = (await this.lineReceivedRepo.findByShipmentAndIntake(shipmentId, intakeId)).find(
+        (l) => l.item_id === line.item_id
+      )?.received_qty ?? 0;
+      const otherShipmentsTotal = totalSoFar - currentForThisShipment;
+      const newTotal = otherShipmentsTotal + line.received_qty;
+      if (poQty > 0 && newTotal > poQty * maxAllowed) {
+        throw new AppError(
+          `Total received qty for item ${line.item_id} cannot exceed ${maxAllowed * 100}% of PO qty (${poQty})`,
+          400
+        );
+      }
+    }
+    await this.lineReceivedRepo.setLines(shipmentId, intakeId, lines);
+    return this.getById(shipmentId);
   }
 }
