@@ -2,12 +2,16 @@
  * Auth DTOs and shared types (API Spec §5.1).
  */
 
-/** User shape returned in login and GET /auth/me (no password). */
+/** User shape returned in login, refresh, and GET /auth/me (no password). */
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
   role: string;
+  /** Extra API permissions beyond the role matrix (validated keys only). */
+  permission_overrides: string[];
+  /** Role permissions ∪ overrides. */
+  effective_permissions: string[];
 }
 
 /** Login request body. */
@@ -36,6 +40,7 @@ export interface RefreshResponseData {
   token_type: "Bearer";
   expires_in: number;
   refresh_token: string;
+  user: AuthUser;
 }
 
 /** JWT access token payload (encoded, not stored). */
@@ -44,6 +49,7 @@ export interface AccessTokenPayload {
   email: string;
   name?: string;
   role: string;
+  permission_overrides?: string[];
   type: "access";
   iat?: number;
   exp?: number;
@@ -58,6 +64,7 @@ export interface UserRow {
   role: string;
   is_active: boolean;
   email_verified_at: Date | null;
+  permission_overrides: string[] | null;
   created_at: Date;
   updated_at: Date;
 }

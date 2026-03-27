@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useState, Suspense } from "react";
 import { Input, Button } from "@/components/forms";
 import { resetPassword as resetPasswordApi } from "@/services/auth-service";
+import { useToast } from "@/components/providers/ToastProvider";
 import { isApiError } from "@/types/api";
 import styles from "./ResetPasswordForm.module.css";
 
@@ -18,6 +19,7 @@ function ResetPasswordFormInner() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const { pushToast } = useToast();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,7 +38,9 @@ function ResetPasswordFormInner() {
         password_confirmation: passwordConfirmation,
       });
       if (isApiError(res)) {
-        setError(res.message ?? "Reset failed");
+        const msg = res.message ?? "Reset failed";
+        setError(msg);
+        pushToast(msg, "error");
         if (res.errors?.length) {
           const byField: Record<string, string> = {};
           for (const { field, message } of res.errors) byField[field] = message;
@@ -44,9 +48,12 @@ function ResetPasswordFormInner() {
         }
         return;
       }
+      pushToast("Password updated. You can sign in with your new password.", "success");
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Reset failed");
+      const msg = err instanceof Error ? err.message : "Reset failed";
+      setError(msg);
+      pushToast(msg, "error");
     } finally {
       setLoading(false);
     }

@@ -1,0 +1,86 @@
+/**
+ * PT (company) and Plant options for Create Purchase Order.
+ * Plant is either a single fixed value or a dropdown per PT.
+ */
+
+/** PO line unit codes: Excel export set + legacy UI-only units (L, M2, PAIR, DOZ, OTH). Sorted A–Z. */
+export const PO_ITEM_UNIT_OPTIONS = [
+  "BAG",
+  "BAGS",
+  "BG",
+  "BOX",
+  "CARTONS",
+  "CASE",
+  "CASES",
+  "CBM",
+  "CS",
+  "CT",
+  "CTN",
+  "DOZ",
+  "KGM",
+  "KG",
+  "KGS",
+  "L",
+  "LOT",
+  "M",
+  "M2",
+  "MT",
+  "NIU",
+  "OTH",
+  "PACK",
+  "PALLET",
+  "PAIR",
+  "PC",
+  "PCE",
+  "PCESET",
+  "PCEUN",
+  "PCSET",
+  "PCS",
+  "PCUN",
+  "PK",
+  "PKG",
+  "ROLL",
+  "SET",
+  "SETS",
+  "TNE",
+  "UN",
+  "UNIT",
+  "UNPCE",
+  "UNPCS",
+] as const;
+
+export type PoItemUnitOption = (typeof PO_ITEM_UNIT_OPTIONS)[number];
+
+export const PT_OPTION_LABELS = [
+  "ENERGI UNGGUL PERSADA",
+  "ENERGI OLEO PERSADA",
+  "PRIMUS SANUS COOKING OIL INDUSTRIAL (PT. PRISCOLIN)",
+  "JATI PERKASA NUSANTARA",
+  "ROYAL FOODS INDONESIA",
+  "PRIMA MAKMUR CAKRAWALA",
+  "SUMBER PANGAN CEMERLANG",
+] as const;
+
+export type PtOptionLabel = (typeof PT_OPTION_LABELS)[number];
+
+export type PtPlantConfig =
+  | { mode: "fixed"; plant: string }
+  | { mode: "select"; plants: readonly string[] };
+
+export const PT_PLANT_MAP: Record<PtOptionLabel, PtPlantConfig> = {
+  "ENERGI UNGGUL PERSADA": {
+    mode: "select",
+    plants: ["BATAM", "BONTANG", "LUBUK GAUNG", "KIJING / TJ PURA"],
+  },
+  "ENERGI OLEO PERSADA": { mode: "fixed", plant: "MORAWA" },
+  "PRIMUS SANUS COOKING OIL INDUSTRIAL (PT. PRISCOLIN)": { mode: "fixed", plant: "KARAWANG" },
+  "JATI PERKASA NUSANTARA": { mode: "select", plants: ["SIDOARJO", "GRESIK"] },
+  "ROYAL FOODS INDONESIA": { mode: "fixed", plant: "BEKASI" },
+  "PRIMA MAKMUR CAKRAWALA": { mode: "fixed", plant: "LUBUK GAUNG" },
+  "SUMBER PANGAN CEMERLANG": { mode: "fixed", plant: "LUBUK GAUNG" },
+};
+
+export function getPlantConfigForPt(pt: string): PtPlantConfig | null {
+  if (!pt || !(pt in PT_PLANT_MAP)) return null;
+  return PT_PLANT_MAP[pt as PtOptionLabel];
+}

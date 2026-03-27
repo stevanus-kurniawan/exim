@@ -34,8 +34,10 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-eos}:${POSTGRES_PASSWORD:-eos_dev_password}@postgres:5432/${POSTGRES_DB:-eos_db}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-in-production}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-in-production}
-      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-1h}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      PPN_PERCENTAGE: ${PPN_PERCENTAGE:-11}
+      PPH_PERCENTAGE: ${PPH_PERCENTAGE:-2.5}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       STORAGE_LOCAL_PATH: /app/uploads
       # Allow both localhost and 127.0.0.1 so login works from either URL
@@ -63,7 +65,8 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      # Use frontEnd (capital E) so Linux Docker builds match the repo folder name
+      context: ./frontEnd
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3003/api/v1}

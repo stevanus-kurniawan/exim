@@ -24,11 +24,20 @@ export class ShipmentPoLineReceivedRepository {
     return result.rows;
   }
 
-  /** Total received qty for this (intake, item) across all shipments (for validation). */
+  /**
+   * Total delivered qty for this PO line across all shipments that are **still coupled** to this PO
+   * (`shipment_po_mapping.decoupled_at IS NULL`). No filter on shipment status — amounts on in-progress
+   * shipments count the same as delivered ones. Excludes rows left after decouple (no active mapping).
+   */
   async getTotalReceivedByIntakeItem(intakeId: string, itemId: string): Promise<number> {
     const result = await this.pool.query<{ total: string }>(
-      `SELECT COALESCE(SUM(received_qty), 0)::text AS total
-       FROM shipment_po_line_received WHERE intake_id = $1 AND item_id = $2`,
+      `SELECT COALESCE(SUM(r.received_qty), 0)::text AS total
+       FROM shipment_po_line_received r
+       INNER JOIN shipment_po_mapping m
+         ON m.shipment_id = r.shipment_id
+         AND m.intake_id = r.intake_id
+         AND m.decoupled_at IS NULL
+       WHERE r.intake_id = $1 AND r.item_id = $2`,
       [intakeId, itemId]
     );
     const total = result.rows[0]?.total;

@@ -9,11 +9,10 @@ import { config } from "../config/index.js";
 import { errorHandler, AppError } from "../middlewares/errorHandler.js";
 import { healthRoutes } from "../modules/health/routes.js";
 import { authRoutes } from "../modules/auth/routes.js";
-import { importTransactionRoutes } from "../modules/import-transactions/routes.js";
-import { documentRoutes } from "../modules/documents/routes.js";
-import { dashboardRoutes } from "../modules/dashboard/routes.js";
 import { poIntakeRoutes } from "../modules/po-intake/routes.js";
 import { shipmentRoutes } from "../modules/shipments/routes.js";
+import { userAdminRoutes } from "../modules/users/routes.js";
+import { dashboardRoutes } from "../modules/dashboard/routes.js";
 
 export function createApp(): express.Application {
   const app = express();
@@ -37,10 +36,9 @@ export function createApp(): express.Application {
 
   app.use("/api/v1/health", healthRoutes);
   app.use("/api/v1/auth", authRoutes);
-  app.use("/api/v1/import-transactions", importTransactionRoutes);
+  app.use("/api/v1/users", userAdminRoutes);
   app.use("/api/v1/po", poIntakeRoutes);
   app.use("/api/v1/shipments", shipmentRoutes);
-  app.use("/api/v1/documents", documentRoutes);
   app.use("/api/v1/dashboard", dashboardRoutes);
 
   app.use((_req, _res, next) => next(new AppError("Not found", 404)));

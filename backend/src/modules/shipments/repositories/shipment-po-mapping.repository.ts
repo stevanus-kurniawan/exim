@@ -4,17 +4,19 @@
 
 import type { Pool } from "pg";
 import { getPool } from "../../../db/index.js";
-import type { ShipmentPoMappingRow } from "../dto/index.js";
+import type { ShipmentListLinkedPo, ShipmentListPoLineItem, ShipmentPoMappingRow } from "../dto/index.js";
 
 export interface LinkedPoWithIntake {
   intake_id: string;
   po_number: string;
+  pt: string | null;
   plant: string | null;
   supplier_name: string;
   incoterm_location: string | null;
   currency: string | null;
   invoice_no: string | null;
   currency_rate: number | null;
+  taken_by_name: string | null;
   coupled_at: Date;
   coupled_by: string;
 }
@@ -24,8 +26,14 @@ export interface LinkedShipmentByIntake {
   shipment_id: string;
   shipment_number: string;
   current_status: string;
+  /** Shipment incoterm — used for PO status (PICKED_UP position in lifecycle chain). */
+  incoterm: string | null;
   coupled_at: Date;
   coupled_by: string;
+  atd: Date | null;
+  ata: Date | null;
+  /** When shipment was closed / delivered (same as shipment.closed_at). */
+  closed_at: Date | null;
 }
 
 export class ShipmentPoMappingRepository {
@@ -36,10 +44,11 @@ export class ShipmentPoMappingRepository {
   /** Currently coupled mappings only (decoupled_at IS NULL). */
   async findActiveByShipmentId(shipmentId: string): Promise<LinkedPoWithIntake[]> {
     const result = await this.pool.query<LinkedPoWithIntake>(
-      `SELECT m.intake_id, i.po_number, i.plant, i.supplier_name, i.incoterm_location, i.currency,
-         m.invoice_no, m.currency_rate, m.coupled_at, m.coupled_by
+      `SELECT m.intake_id, i.po_number, i.pt, i.plant, i.supplier_name, i.incoterm_location, i.currency,
+         m.invoice_no, m.currency_rate, u.name AS taken_by_name, m.coupled_at, m.coupled_by
        FROM shipment_po_mapping m
-       JOIN imported_po_intake i ON i.id = m.intake_id
+       JOIN Import_purchase_order i ON i.id = m.intake_id
+       LEFT JOIN users u ON u.id::text = i.taken_by_user_id
        WHERE m.shipment_id = $1 AND m.decoupled_at IS NULL
        ORDER BY m.coupled_at ASC`,
       [shipmentId]
@@ -76,7 +85,8 @@ export class ShipmentPoMappingRepository {
   /** Shipments currently linked to this PO (intake). Used for PO detail page. */
   async findActiveShipmentsByIntakeId(intakeId: string): Promise<LinkedShipmentByIntake[]> {
     const result = await this.pool.query<LinkedShipmentByIntake>(
-      `SELECT m.shipment_id, s.shipment_no AS shipment_number, s.current_status, m.coupled_at, m.coupled_by
+      `SELECT m.shipment_id, s.shipment_no AS shipment_number, s.current_status, s.incoterm, m.coupled_at, m.coupled_by,
+              s.atd, s.ata, s.closed_at
        FROM shipment_po_mapping m
        JOIN shipments s ON s.id = m.shipment_id
        WHERE m.intake_id = $1 AND m.decoupled_at IS NULL
@@ -84,6 +94,63 @@ export class ShipmentPoMappingRepository {
       [intakeId]
     );
     return result.rows;
+  }
+
+  /**
+   * Active linked POs with line summaries for many shipments (list view).
+   * Ordered by coupled_at per shipment.
+   */
+  async findActiveLinkedPosWithItemsByShipmentIds(shipmentIds: string[]): Promise<Map<string, ShipmentListLinkedPo[]>> {
+    const map = new Map<string, ShipmentListLinkedPo[]>();
+    if (shipmentIds.length === 0) return map;
+    const result = await this.pool.query<{
+      shipment_id: string;
+      intake_id: string;
+      po_number: string;
+      pt: string | null;
+      plant: string | null;
+      taken_by_name: string | null;
+      items: ShipmentListPoLineItem[] | null;
+    }>(
+      `SELECT m.shipment_id, m.intake_id, i.po_number, i.pt, i.plant, u.name AS taken_by_name,
+        COALESCE(
+          (SELECT json_agg(
+            json_build_object(
+              'item_description', it.item_description,
+              'qty_po', it.qty,
+              'delivery_qty', r.received_qty,
+              'unit', it.unit
+            ) ORDER BY it.line_number
+          )
+          FROM Import_purchase_order_items it
+          LEFT JOIN shipment_po_line_received r
+            ON r.shipment_id = m.shipment_id
+            AND r.intake_id = m.intake_id
+            AND r.item_id = it.id
+          WHERE it.intake_id = m.intake_id),
+          '[]'::json
+        ) AS items
+       FROM shipment_po_mapping m
+       JOIN Import_purchase_order i ON i.id = m.intake_id
+       LEFT JOIN users u ON u.id::text = i.taken_by_user_id
+       WHERE m.shipment_id = ANY($1::uuid[]) AND m.decoupled_at IS NULL
+       ORDER BY m.shipment_id, m.coupled_at ASC`,
+      [shipmentIds]
+    );
+    for (const row of result.rows) {
+      const list = map.get(row.shipment_id) ?? [];
+      const items = Array.isArray(row.items) ? row.items : [];
+      list.push({
+        intake_id: row.intake_id,
+        po_number: row.po_number,
+        pt: row.pt,
+        plant: row.plant,
+        taken_by_name: row.taken_by_name,
+        items,
+      });
+      map.set(row.shipment_id, list);
+    }
+    return map;
   }
 
   /** Count currently coupled POs for a shipment. */
@@ -118,6 +185,40 @@ export class ShipmentPoMappingRepository {
     );
     if (!result.rows[0]) throw new Error("ShipmentPoMappingRepository.couple: no row returned");
     return result.rows[0];
+  }
+
+  /** All PO mappings for a shipment (including decoupled), for activity log. */
+  async findAllMappingsWithPoByShipmentId(shipmentId: string): Promise<
+    Array<{
+      mapping_id: string;
+      intake_id: string;
+      po_number: string;
+      coupled_at: Date;
+      coupled_by: string;
+      decoupled_at: Date | null;
+      decoupled_by: string | null;
+      decouple_reason: string | null;
+    }>
+  > {
+    const result = await this.pool.query<{
+      mapping_id: string;
+      intake_id: string;
+      po_number: string;
+      coupled_at: Date;
+      coupled_by: string;
+      decoupled_at: Date | null;
+      decoupled_by: string | null;
+      decouple_reason: string | null;
+    }>(
+      `SELECT m.id AS mapping_id, m.intake_id, i.po_number, m.coupled_at, m.coupled_by,
+              m.decoupled_at, m.decoupled_by, m.decouple_reason
+       FROM shipment_po_mapping m
+       JOIN Import_purchase_order i ON i.id = m.intake_id
+       WHERE m.shipment_id = $1
+       ORDER BY m.coupled_at ASC`,
+      [shipmentId]
+    );
+    return result.rows;
   }
 
   /** Decouple intake from shipment (audit: set decoupled_at, decoupled_by, reason). */

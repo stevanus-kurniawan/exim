@@ -10,6 +10,9 @@ import type {
   ShipmentTimelineEntry,
   ShipmentStatusSummaryData,
   ShipmentBid,
+  ShipmentNote,
+  ShipmentActivityItem,
+  ShipmentDocumentListItem,
 } from "@/types/shipments";
 import type { ApiResponse } from "@/types/api";
 
@@ -21,6 +24,10 @@ function buildQueryString(query: ListShipmentsQuery): string {
   if (query.status) params.set("status", query.status);
   if (query.supplier_name) params.set("supplier_name", query.supplier_name);
   if (query.po_number) params.set("po_number", query.po_number);
+  if (query.from_date) params.set("from_date", query.from_date);
+  if (query.to_date) params.set("to_date", query.to_date);
+  if (query.po_from_date) params.set("po_from_date", query.po_from_date);
+  if (query.po_to_date) params.set("po_to_date", query.po_to_date);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
@@ -43,6 +50,11 @@ export async function getShipmentDetail(
 export interface UpdateShipmentPayload {
   etd?: string;
   eta?: string;
+  atd?: string;
+  ata?: string;
+  depo?: boolean;
+  depo_location?: string | null;
+  /** Shipment remarks (backend UpdateShipmentDto). */
   remarks?: string;
   pib_type?: string;
   no_request_pib?: string;
@@ -53,7 +65,9 @@ export interface UpdateShipmentPayload {
   insurance_no?: string;
   coo?: string;
   incoterm_amount?: number;
-  bm?: number;
+  cbm?: number;
+  net_weight_mt?: number;
+  gross_weight_mt?: number;
   bm_percentage?: number;
   origin_port_name?: string;
   origin_port_country?: string;
@@ -66,7 +80,17 @@ export interface UpdateShipmentPayload {
   incoterm?: string;
   closed_at?: string;
   close_reason?: string;
-  kawasan_berikat?: string;
+  kawasan_berikat?: string | null;
+  surveyor?: string | null;
+  product_classification?: string | null;
+  unit_20ft?: boolean;
+  unit_40ft?: boolean;
+  unit_package?: boolean;
+  unit_20_iso_tank?: boolean;
+  container_count_20ft?: number | null;
+  container_count_40ft?: number | null;
+  package_count?: number | null;
+  container_count_20_iso_tank?: number | null;
 }
 
 export async function updateShipment(
@@ -98,6 +122,28 @@ export async function getShipmentStatusSummary(
   accessToken: string | null
 ): Promise<ApiResponse<ShipmentStatusSummaryData>> {
   return apiGet<ShipmentStatusSummaryData>(`shipments/${id}/status-summary`, accessToken);
+}
+
+export async function getShipmentActivityLog(
+  id: string,
+  accessToken: string | null
+): Promise<ApiResponse<{ items: ShipmentActivityItem[] }>> {
+  return apiGet<{ items: ShipmentActivityItem[] }>(`shipments/${id}/activity-log`, accessToken);
+}
+
+export async function listShipmentNotes(
+  shipmentId: string,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentNote[]>> {
+  return apiGet<ShipmentNote[]>(`shipments/${shipmentId}/notes`, accessToken);
+}
+
+export async function createShipmentNote(
+  shipmentId: string,
+  note: string,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentNote>> {
+  return apiPost<ShipmentNote>(`shipments/${shipmentId}/notes`, { note }, accessToken);
 }
 
 export async function couplePo(
@@ -194,10 +240,50 @@ export async function updateShipmentPoMapping(
 export async function updateShipmentPoLines(
   shipmentId: string,
   intakeId: string,
-  lines: { item_id: string; received_qty: number }[],
+  lines: {
+    item_id: string;
+    received_qty: number;
+    net_weight_mt: number | null;
+    gross_weight_mt: number | null;
+  }[],
   accessToken: string | null
 ): Promise<ApiResponse<ShipmentDetail>> {
   return apiPatch<ShipmentDetail>(`shipments/${shipmentId}/po/${intakeId}/lines`, { lines }, accessToken);
+}
+
+export async function listShipmentDocuments(
+  shipmentId: string,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentDocumentListItem[]>> {
+  return apiGet<ShipmentDocumentListItem[]>(`shipments/${shipmentId}/documents`, accessToken);
+}
+
+export async function uploadShipmentDocument(
+  shipmentId: string,
+  file: File,
+  documentType: string,
+  status: "DRAFT" | "FINAL" | null,
+  accessToken: string | null,
+  intakeId?: string | null
+): Promise<ApiResponse<ShipmentDocumentListItem>> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("document_type", documentType);
+  if (status) form.append("status", status);
+  if (intakeId) form.append("intake_id", intakeId);
+  return apiRequest<ShipmentDocumentListItem>(`shipments/${shipmentId}/documents`, {
+    method: "POST",
+    body: form,
+    accessToken,
+  });
+}
+
+export async function deleteShipmentDocument(
+  shipmentId: string,
+  documentId: string,
+  accessToken: string | null
+): Promise<ApiResponse<{ id: string }>> {
+  return apiDelete<{ id: string }>(`shipments/${shipmentId}/documents/${documentId}`, accessToken);
 }
 
 

@@ -18,6 +18,12 @@ poIntakeRoutes.post(
   controller.create
 );
 poIntakeRoutes.get("/", authMiddleware, requirePermission(PERMISSIONS.VIEW_PO_INTAKE), controller.list);
+poIntakeRoutes.get(
+  "/lookup-by-po-number",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_PO_INTAKE),
+  controller.lookupByPoNumber
+);
 poIntakeRoutes.get("/:id", authMiddleware, requirePermission(PERMISSIONS.VIEW_PO_INTAKE), controller.getById);
 poIntakeRoutes.post("/:id/take", authMiddleware, requirePermission(PERMISSIONS.TAKE_OWNERSHIP), controller.takeOwnership);
 poIntakeRoutes.post(

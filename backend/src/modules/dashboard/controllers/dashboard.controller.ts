@@ -1,29 +1,43 @@
-/**
- * Dashboard controllers: parse request, return response only.
- */
-
-import type { Request, Response, NextFunction } from "express";
-import { sendSuccess } from "../../../shared/response.js";
-import { DashboardService } from "../services/dashboard.service.js";
+import type { NextFunction, Request, Response } from "express";
+import { sendError, sendSuccess } from "../../../shared/response.js";
 import { DashboardRepository } from "../repositories/dashboard.repository.js";
+import { DashboardService } from "../services/dashboard.service.js";
 
-const repo = new DashboardRepository();
-const service = new DashboardService(repo);
+const service = new DashboardService(new DashboardRepository());
 
-export async function getImportSummary(_req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const data = await service.getImportSummary();
-    sendSuccess(res, data);
-  } catch (e) {
-    next(e);
-  }
+function parseIntegerQuery(value: unknown): number | undefined {
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-export async function getImportStatusSummary(_req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function getProductSpecificationSummary(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const month = parseIntegerQuery(req.query.month);
+  const year = parseIntegerQuery(req.query.year);
+
+  if (month != null && (month < 1 || month > 12)) {
+    sendError(res, "Validation error", {
+      statusCode: 400,
+      errors: [{ field: "month", message: "month must be between 1 and 12" }],
+    });
+    return;
+  }
+  if (year != null && (year < 2000 || year > 9999)) {
+    sendError(res, "Validation error", {
+      statusCode: 400,
+      errors: [{ field: "year", message: "year must be a 4-digit number" }],
+    });
+    return;
+  }
+
   try {
-    const data = await service.getImportStatusSummary();
-    sendSuccess(res, data);
-  } catch (e) {
-    next(e);
+    const items = await service.getProductSpecificationSummary({ month, year });
+    sendSuccess(res, items);
+  } catch (error) {
+    next(error);
   }
 }

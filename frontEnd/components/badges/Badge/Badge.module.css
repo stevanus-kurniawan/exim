@@ -15,20 +15,43 @@
   background-color: var(--color-semantic-primary-default, #c43a31);
 }
 
+/* Delivered / grouped: green text on soft green (success semantics). */
 .success {
-  color: var(--color-primitive-text-charcoal, #2b2b2b);
-  background-color: var(--color-primitive-background-light, #f4f4f4);
-  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  color: #14532d;
+  background-color: #ecfdf3;
+  border: 1px solid #86efac;
 }
 
+/* Customs, bidding, attention: amber text on soft amber. */
 .warning {
-  color: var(--color-primitive-text-charcoal, #2b2b2b);
-  background-color: var(--color-primitive-background-lighter, #fafafa);
-  border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
+  color: #9a3412;
+  background-color: #fff7ed;
+  border: 1px solid #fdba74;
 }
 
 .neutral {
   color: var(--color-primitive-text-steel, #6b6b6b);
   background-color: var(--color-primitive-background-lighter, #fafafa);
   border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+}
+
+/* In transit / pickup chain: blue text on soft blue. */
+.info {
+  color: #1e40af;
+  background-color: #eff6ff;
+  border: 1px solid #93c5fd;
+}
+
+/* Transport confirmed: teal (handoff locked in). */
+.accent {
+  color: #0f766e;
+  background-color: #f0fdfa;
+  border: 1px solid #5eead4;
+}
+
+/* Paperwork / early setup: slate. */
+.muted {
+  color: #475569;
+  background-color: #f1f5f9;
+  border: 1px solid #cbd5e1;
 }

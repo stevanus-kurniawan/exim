@@ -1,12 +1,17 @@
 /**
- * Update received qty per PO line for a linked PO.
+ * Update received qty and optional net/gross weight (MT) per PO line for a linked PO.
  */
 
 import type { Request } from "express";
 import type { ErrorField } from "../../../shared/response.js";
 
+export interface UpdatePoLineItemDto {
+  item_id: string;
+  received_qty: number;
+}
+
 export interface UpdatePoLinesDto {
-  lines: { item_id: string; received_qty: number }[];
+  lines: UpdatePoLineItemDto[];
 }
 
 export function validateUpdatePoLinesBody(
@@ -19,7 +24,8 @@ export function validateUpdatePoLinesBody(
     errors.push({ field: "lines", message: "lines must be an array" });
     return { ok: false, errors };
   }
-  const lines: { item_id: string; received_qty: number }[] = [];
+
+  const lines: UpdatePoLineItemDto[] = [];
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i] && typeof raw[i] === "object" ? (raw[i] as Record<string, unknown>) : {};
     const item_id = typeof item.item_id === "string" ? item.item_id.trim() : "";
@@ -34,6 +40,7 @@ export function validateUpdatePoLinesBody(
     }
     lines.push({ item_id, received_qty });
   }
+
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, data: { lines } };
 }

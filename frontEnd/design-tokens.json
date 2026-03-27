@@ -1,9 +1,9 @@
 {
   "$metadata": {
-    "name": "KPN Downstream Design System",
+    "name": "EOS Design System",
     "version": "1.0.0",
-    "description": "Industrial clarity over decoration. A production-ready design system for manufacturing and industrial enterprises.",
-    "industry": "Manufacturing / Downstream / Industrial"
+    "description": "Brand-aligned tokens (Exim Operation System). Industrial clarity; red as accent.",
+    "industry": "Import / Export / Operations"
   },
   "color": {
     "primitive": {
@@ -119,20 +119,34 @@
           "type": "color",
           "description": "Text on destructive background"
         }
+      },
+      "success": {
+        "default": {
+          "value": "#00d97e",
+          "type": "color",
+          "description": "Success / positive state"
+        }
+      },
+      "warning": {
+        "default": {
+          "value": "#fdab3d",
+          "type": "color",
+          "description": "Warning / caution state"
+        }
       }
     }
   },
   "typography": {
     "fontFamily": {
       "primary": {
-        "value": "'Inter', system-ui, -apple-system, sans-serif",
+        "value": "var(--font-inter), system-ui, -apple-system, sans-serif",
         "type": "fontFamily",
-        "description": "Primary UI font for all interface elements"
+        "description": "Primary UI font (next/font Inter + fallbacks)"
       },
       "heading": {
-        "value": "'Merriweather', Georgia, serif",
+        "value": "var(--font-merriweather), Georgia, serif",
         "type": "fontFamily",
-        "description": "Optional serif font for large headings and brand moments"
+        "description": "Serif for page titles (next/font Merriweather + fallbacks)"
       }
     },
     "fontSize": {

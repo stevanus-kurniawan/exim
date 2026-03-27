@@ -1,4 +1,4 @@
-/* Create Purchase Order — full-page form with roomy items section */
+/* Create Purchase Order — table layout; Qty/Unit/Price grouped and centered vs Total amount column */
 
 .section {
   padding-bottom: var(--spacing-6, 40px);
@@ -56,12 +56,6 @@
   appearance: auto;
 }
 
-.itemsHint {
-  font-size: var(--typography-fontSize-small, 14px);
-  color: var(--color-primitive-text-steel, #6b6b6b);
-  margin: 0 0 var(--spacing-3, 16px);
-}
-
 .itemsTableWrap {
   overflow-x: auto;
   margin-bottom: var(--spacing-3, 16px);
@@ -71,7 +65,7 @@
 
 .itemsTable {
   width: 100%;
-  min-width: 800px;
+  min-width: 720px;
   border-collapse: collapse;
   font-size: var(--typography-fontSize-base, 16px);
 }
@@ -90,52 +84,53 @@
   background-color: var(--color-primitive-background-lighter, #fafafa);
 }
 
-/* Spacious columns: Description wide, Qty/Unit/Value/Total comfortable */
-.itemsTh:nth-child(1),
-.itemsTd:nth-child(1) {
-  min-width: 280px;
-  width: 35%;
+/* Description column */
+.itemsTable thead tr th:nth-child(1),
+.itemsTable tbody tr td:nth-child(1) {
+  min-width: 220px;
+  width: 32%;
+  vertical-align: top;
 }
 
-.itemsTh:nth-child(2),
-.itemsTd:nth-child(2) {
-  min-width: 100px;
+/* Metrics group (Qty, Unit, Price): centered in cell; Total column stays right as anchor */
+.thMetricsGroup,
+.tdMetricsGroup {
+  text-align: center;
+  vertical-align: middle;
 }
 
-.itemsTh:nth-child(3),
-.itemsTd:nth-child(3) {
-  min-width: 120px;
+.metricsHeaderInner,
+.metricsCluster {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) minmax(100px, 1fr) minmax(140px, 1fr);
+  gap: var(--spacing-3, 16px);
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+  align-items: end;
 }
 
-.itemsTh:nth-child(4),
-.itemsTd:nth-child(4) {
-  min-width: 120px;
+.metricsHeaderInner span {
+  display: block;
+  text-align: center;
+  font-size: var(--typography-fontSize-small, 14px);
 }
 
-.itemsTh:nth-child(5),
-.itemsTd:nth-child(5) {
-  min-width: 120px;
+.unitCombobox {
+  min-width: 0;
 }
 
-.itemsTh:nth-child(6),
-.itemsTd:nth-child(6) {
-  min-width: 120px;
-}
-
-/* Center-align Qty, Unit, Value, Total value (header and cells) */
 .itemsThCenter,
-.itemsTdCenter {
+.itemsTdTotal {
   text-align: center;
-}
-
-.itemsTdCenter .itemsInput,
-.itemsTdCenter .itemsSelect {
-  text-align: center;
+  vertical-align: middle;
+  min-width: 120px;
+  width: 10rem;
 }
 
 .itemsThRemove,
 .itemsTdRemove {
-  width: 80px;
+  width: 88px;
   padding: var(--spacing-3, 16px);
   text-align: center;
   vertical-align: middle;
@@ -150,8 +145,10 @@
   width: 100%;
   min-height: 80px;
   padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  font-family: inherit;
   font-size: var(--typography-fontSize-base, 16px);
-  line-height: 1.5;
+  line-height: var(--typography-lineHeight-default, 1.5);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
   border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
   border-radius: var(--borderRadius-md, 8px);
   resize: vertical;
@@ -168,12 +165,14 @@
   width: 100%;
   min-width: 0;
   padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  font-family: inherit;
   font-size: var(--typography-fontSize-base, 16px);
   border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
   border-radius: var(--borderRadius-md, 8px);
   background-color: var(--color-primitive-background-white, #ffffff);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
   box-sizing: border-box;
+  text-align: center;
 }
 
 .itemsInput:focus,
@@ -182,17 +181,19 @@
   border-color: var(--color-primitive-border-dark, #9e9e9e);
 }
 
+/* Searchable unit field (input + datalist): match country field — left-aligned text */
+.itemsInputDatalist {
+  text-align: left;
+}
+
 .itemsSelect {
   cursor: pointer;
   appearance: auto;
 }
 
 .itemsTdTotal {
-  padding: var(--spacing-3, 16px);
   font-weight: var(--typography-fontWeight-medium, 500);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
-  vertical-align: middle;
-  text-align: center;
 }
 
 .removeRowBtn {
@@ -203,6 +204,7 @@
   border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
   border-radius: var(--borderRadius-sm, 6px);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .removeRowBtn:hover:not(:disabled) {
@@ -252,4 +254,10 @@
   font-size: var(--typography-fontSize-small, 14px);
   color: var(--color-primitive-text-steel, #6b6b6b);
   margin-left: var(--spacing-2, 8px);
+}
+
+@media (max-width: 767px) {
+  .metricsHeaderInner span {
+    font-size: var(--typography-fontSize-xs, 12px);
+  }
 }

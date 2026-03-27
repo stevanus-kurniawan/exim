@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { LOGIN_PATH } from "@/lib/constants";
+import { CommandPalette } from "@/components/navigation";
 import styles from "./Header.module.css";
 
 export interface HeaderProps {
@@ -32,10 +33,17 @@ export function Header({ onMenuClick }: HeaderProps) {
           <span className={styles.menuIcon} aria-hidden />
         </button>
         <Link href="/dashboard" className={styles.logo}>
-          EOS
+          <span className={styles.logoMark} aria-hidden>
+            <span className={styles.logoMarkInner}>EOS</span>
+          </span>
+          <span className={styles.logoTextWrap}>
+            <span className={styles.logoText}>EOS</span>
+            <span className={styles.logoSubtext}>Exim Operation System</span>
+          </span>
         </Link>
       </div>
       <nav className={styles.nav} aria-label="User menu">
+        <CommandPalette />
         {user && (
           <span className={styles.user}>
             <span className={styles.userName}>{user.name}</span>

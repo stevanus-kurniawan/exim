@@ -4,9 +4,11 @@
 
 export const INTAKE_STATUSES = [
   "NEW_PO_DETECTED",
-  "NOTIFIED",
-  "TAKEN_BY_EXIM",
-  "GROUPED_TO_SHIPMENT",
+  "CLAIMED",
+  "ALLOCATION_IN_PROGRESS",
+  "PARTIALLY_SHIPPED",
+  "SHIPPED",
+  "FULFILLED",
 ] as const;
 
 export type IntakeStatus = (typeof INTAKE_STATUSES)[number];
@@ -16,7 +18,6 @@ export interface PoIntakeItemDto {
   qty?: number;
   unit?: string;
   value?: number;
-  kurs?: number;
 }
 
 /** Create intake (ingestion or test-create). Matches SaaS payload. Rule: 1 PO = multiple items, 1 incoterm. */
@@ -24,6 +25,8 @@ export interface CreatePoIntakeDto {
   external_id: string;
   po_number: string;
   plant?: string;
+  /** Legal entity / PT code on PO header (distinct from plant). */
+  pt?: string;
   supplier_name: string;
   delivery_location?: string;
   incoterm_location?: string;
@@ -46,6 +49,7 @@ export interface PoIntakeRow {
   external_id: string;
   po_number: string;
   plant: string | null;
+  pt: string | null;
   supplier_name: string;
   delivery_location: string | null;
   incoterm_location: string | null;
@@ -66,7 +70,6 @@ export interface PoIntakeItemRow {
   qty: number | null;
   unit: string | null;
   value: number | null;
-  kurs: number | null;
   created_at: Date;
 }
 
@@ -75,12 +78,18 @@ export interface PoIntakeListItem {
   external_id: string;
   po_number: string;
   plant: string | null;
+  pt: string | null;
   supplier_name: string;
   delivery_location: string | null;
   incoterm_location: string | null;
+  kawasan_berikat: string | null;
+  currency: string | null;
   intake_status: string;
+  taken_by_user_id: string | null;
+  taken_by_name: string | null;
   taken_at: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface PoIntakeDetail {
@@ -88,6 +97,7 @@ export interface PoIntakeDetail {
   external_id: string;
   po_number: string;
   plant: string | null;
+  pt: string | null;
   supplier_name: string;
   delivery_location: string | null;
   incoterm_location: string | null;
@@ -107,7 +117,6 @@ export interface PoIntakeDetail {
     qty: number | null;
     unit: string | null;
     value: number | null;
-    kurs: number | null;
     /** Received quantity (from deliveries/shipments). When no source: 0. */
     received_qty: number | null;
     /** Remaining qty from PO perspective: max(0, qty - received_qty). */
@@ -120,9 +129,23 @@ export interface PoIntakeDetail {
     shipment_id: string;
     shipment_number: string;
     current_status: string;
+    incoterm: string | null;
     coupled_at: string;
     coupled_by: string;
+    atd: string | null;
+    ata: string | null;
+    /** When the shipment was closed (delivered). */
+    delivered_at: string | null;
+    /** Qty delivered on this shipment per PO line (0 if not recorded). */
+    lines_received: {
+      item_id: string;
+      line_number: number;
+      item_description: string | null;
+      received_qty: number;
+    }[];
   }[];
+  /** True when total delivered qty across shipments exceeds total PO line qty. */
+  overshipped: boolean;
 }
 
 export interface CreatePoIntakeResponse {

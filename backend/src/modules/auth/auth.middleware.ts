@@ -6,6 +6,7 @@ import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../../config/index.js";
 import { sendError } from "../../shared/response.js";
+import { computeEffectivePermissions, normalizePermissionOverrides } from "../../shared/rbac.js";
 import type { AuthUser } from "./dto/index.js";
 import type { AccessTokenPayload } from "./dto/index.js";
 
@@ -33,11 +34,15 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
       sendError(res, "Invalid token", { statusCode: 401 });
       return;
     }
+    const permission_overrides = normalizePermissionOverrides(payload.permission_overrides);
+    const effective_permissions = [...computeEffectivePermissions(payload.role ?? "", permission_overrides)];
     const user: AuthUser = {
       id: payload.sub,
       email: payload.email ?? "",
       name: payload.name ?? "",
       role: payload.role ?? "",
+      permission_overrides,
+      effective_permissions,
     };
     req.user = user;
     next();

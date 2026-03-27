@@ -8,7 +8,6 @@ export interface SaasPoItem {
   qty?: number;
   unit?: string;
   value?: number;
-  kurs?: number;
 }
 
 export interface SaasPoResponse {

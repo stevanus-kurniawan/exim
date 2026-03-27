@@ -31,6 +31,11 @@ export const PERMISSIONS = {
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
+/** All known permission keys (for validation and UI). */
+export const ALL_PERMISSION_KEYS: readonly string[] = Object.values(PERMISSIONS);
+
+const ALL_PERM_SET = new Set<string>(ALL_PERMISSION_KEYS);
+
 const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
   [ROLES.ADMIN]: [
     PERMISSIONS.VIEW_TRANSACTIONS,
@@ -74,12 +79,36 @@ function normalizeRole(role: string): string {
   return role.toUpperCase();
 }
 
-/** Returns whether the given role has the given permission. */
+/** Normalize override list to known permissions only. */
+export function normalizePermissionOverrides(overrides: unknown): string[] {
+  if (!Array.isArray(overrides)) return [];
+  const out: string[] = [];
+  for (const p of overrides) {
+    if (typeof p === "string" && ALL_PERM_SET.has(p)) out.push(p);
+  }
+  return out;
+}
+
+/** Union of role permissions and optional per-user overrides. */
+export function computeEffectivePermissions(role: string, overrides: string[]): ReadonlySet<string> {
+  const base = getPermissionsForRole(role);
+  const out = new Set<string>(base);
+  for (const p of normalizePermissionOverrides(overrides)) out.add(p);
+  return out;
+}
+
+/** Whether the user (role + optional overrides) has the permission. */
+export function userHasPermission(
+  role: string,
+  overrides: string[] | null | undefined,
+  permission: string
+): boolean {
+  return computeEffectivePermissions(role, overrides ?? []).has(permission);
+}
+
+/** Role-only check (no overrides). */
 export function hasPermission(role: string, permission: string): boolean {
-  const key = normalizeRole(role);
-  const list = ROLE_PERMISSIONS[key];
-  if (!list) return false;
-  return list.includes(permission as Permission);
+  return userHasPermission(role, [], permission);
 }
 
 /** Returns all permissions for a role (for future use). */

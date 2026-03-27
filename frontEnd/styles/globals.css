@@ -1,12 +1,30 @@
 /**
  * Global styles — use design tokens only (frontend/design-tokens.json).
  * Token values are injected by the root layout via getThemeCssVars(); this file adds base rules.
+ *
+ * Optional short-name aliases (match reference :root) map to the same values as primitive/semantic tokens.
  */
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+:root {
+  --color-brand-primary: var(--color-primitive-brand-red-primary);
+  --color-brand-deep: var(--color-semantic-primary-hover);
+  --color-text-charcoal: var(--color-primitive-text-charcoal);
+  --color-text-steel: var(--color-primitive-text-steel);
+  --color-bg-white: var(--color-primitive-background-white);
+  --color-bg-light: var(--color-primitive-background-light);
+  --color-bg-lighter: var(--color-primitive-background-lighter);
+  --color-border-light: var(--color-primitive-border-light);
+  --color-border-medium: var(--color-primitive-border-medium);
+  --color-border-dark: var(--color-primitive-border-dark);
+  --color-success: var(--color-semantic-success-default);
+  --color-warning: var(--color-semantic-warning-default);
+  --color-danger: var(--color-semantic-destructive-default);
 }
 
 html {

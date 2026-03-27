@@ -1,0 +1,33 @@
+.stack {
+  position: fixed;
+  right: var(--spacing-3, 16px);
+  bottom: var(--spacing-3, 16px);
+  display: grid;
+  gap: var(--spacing-2, 8px);
+  z-index: 120;
+}
+
+.toast {
+  min-width: 220px;
+  max-width: 360px;
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  border-radius: var(--borderRadius-md, 8px);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  background: var(--color-primitive-background-white, #ffffff);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+  box-shadow: var(--elevation-md, 0 2px 4px 0 rgba(0, 0, 0, 0.08));
+  font-size: var(--typography-fontSize-small, 14px);
+}
+
+.success {
+  border-color: var(--color-semantic-success-default, #00d97e);
+}
+
+.error {
+  border-color: var(--color-semantic-destructive-default, #c43a31);
+}
+
+.info {
+  border-color: var(--color-primitive-border-medium, #c4c4c4);
+}
+

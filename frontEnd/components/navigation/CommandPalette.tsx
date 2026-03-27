@@ -1,0 +1,117 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Modal } from "@/components/overlays";
+import { useAuth } from "@/hooks/use-auth";
+import { can } from "@/lib/permissions";
+import styles from "./CommandPalette.module.css";
+
+interface CommandItem {
+  label: string;
+  hint?: string;
+  onRun: () => void;
+}
+
+const MANAGE_USERS = "MANAGE_USERS";
+
+export function CommandPalette() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const baseCommands = useMemo<CommandItem[]>(() => {
+    const items: CommandItem[] = [
+      { label: "Go to Dashboard", hint: "/dashboard", onRun: () => router.push("/dashboard") },
+      { label: "Go to Purchase Order list", hint: "/dashboard/po", onRun: () => router.push("/dashboard/po") },
+      { label: "Create Purchase Order", hint: "/dashboard/po/new", onRun: () => router.push("/dashboard/po/new") },
+      { label: "Go to Shipments list", hint: "/dashboard/shipments", onRun: () => router.push("/dashboard/shipments") },
+    ];
+    if (can(user, MANAGE_USERS)) {
+      items.push({ label: "Go to User management", hint: "/dashboard/users", onRun: () => router.push("/dashboard/users") });
+    }
+    return items;
+  }, [router, user]);
+
+  const dynamicCommands = useMemo<CommandItem[]>(() => {
+    const q = query.trim();
+    if (!q) return [];
+    return [
+      {
+        label: `Search PO: ${q}`,
+        hint: "/dashboard/po",
+        onRun: () => router.push(`/dashboard/po?search=${encodeURIComponent(q)}`),
+      },
+      {
+        label: `Search Shipment: ${q}`,
+        hint: "/dashboard/shipments",
+        onRun: () => router.push(`/dashboard/shipments?search=${encodeURIComponent(q)}`),
+      },
+    ];
+  }, [query, router]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const staticMatches = q
+      ? baseCommands.filter((cmd) => `${cmd.label} ${cmd.hint ?? ""}`.toLowerCase().includes(q))
+      : baseCommands;
+    if (!q) return staticMatches;
+    return [...dynamicCommands, ...staticMatches];
+  }, [baseCommands, dynamicCommands, query]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOpen(true);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  function run(cmd: CommandItem) {
+    setOpen(false);
+    setQuery("");
+    cmd.onRun();
+  }
+
+  return (
+    <>
+      <button type="button" className={styles.trigger} onClick={() => setOpen(true)} aria-label="Open command palette">
+        Search
+        <span className={styles.kbd}>Ctrl/Cmd+K</span>
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Quick command">
+        <input
+          className={styles.input}
+          type="search"
+          placeholder="Type a command..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && filtered.length > 0) {
+              e.preventDefault();
+              run(filtered[0]);
+            }
+          }}
+          aria-label="Filter commands"
+        />
+        <div className={styles.list} role="listbox" aria-label="Commands">
+          {filtered.length === 0 ? (
+            <p className={styles.empty}>No command found.</p>
+          ) : (
+            filtered.map((cmd) => (
+              <button key={cmd.label} type="button" className={styles.item} onClick={() => run(cmd)}>
+                <span>{cmd.label}</span>
+                {cmd.hint && <span className={styles.hint}>{cmd.hint}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+}
+

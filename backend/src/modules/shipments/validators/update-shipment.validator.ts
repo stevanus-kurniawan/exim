@@ -34,7 +34,19 @@ export function validateUpdateShipmentBody(
   const closedAtRaw = body?.closed_at;
   if (closedAtRaw != null) {
     if (typeof closedAtRaw !== "string" || !parseDate(closedAtRaw)) {
-      errors.push({ field: "closed_at", message: "Closed at must be a valid date" });
+      errors.push({ field: "closed_at", message: "Delivered at must be a valid date" });
+    }
+  }
+  const atdRaw = body?.atd;
+  if (atdRaw != null) {
+    if (typeof atdRaw !== "string" || !parseDate(atdRaw)) {
+      errors.push({ field: "atd", message: "ATD must be a valid date" });
+    }
+  }
+  const ataRaw = body?.ata;
+  if (ataRaw != null) {
+    if (typeof ataRaw !== "string" || !parseDate(ataRaw)) {
+      errors.push({ field: "ata", message: "ATA must be a valid date" });
     }
   }
 
@@ -43,6 +55,14 @@ export function validateUpdateShipmentBody(
   const data: UpdateShipmentDto = {};
   if (etdRaw != null && typeof etdRaw === "string") data.etd = etdRaw.trim();
   if (etaRaw != null && typeof etaRaw === "string") data.eta = etaRaw.trim();
+  if (atdRaw != null && typeof atdRaw === "string") data.atd = atdRaw.trim();
+  if (ataRaw != null && typeof ataRaw === "string") data.ata = ataRaw.trim();
+  if (body?.depo !== undefined && body?.depo !== null) {
+    if (typeof body.depo === "boolean") data.depo = body.depo;
+    else errors.push({ field: "depo", message: "depo must be a boolean" });
+  }
+  if (typeof body?.depo_location === "string") data.depo_location = body.depo_location.trim() || null;
+  else if (body?.depo_location === null) data.depo_location = null;
   if (typeof body?.remarks === "string") data.remarks = body.remarks.trim();
   if (typeof body?.pib_type === "string") data.pib_type = body.pib_type.trim() || undefined;
   if (typeof body?.no_request_pib === "string") data.no_request_pib = body.no_request_pib.trim() || undefined;
@@ -60,10 +80,20 @@ export function validateUpdateShipmentBody(
     if (!Number.isFinite(n) || n < 0) errors.push({ field: "incoterm_amount", message: "Must be a non-negative number" });
     else data.incoterm_amount = n;
   }
-  if (body?.bm != null) {
-    const n = Number(body.bm);
-    if (!Number.isFinite(n) || n < 0) errors.push({ field: "bm", message: "Must be a non-negative number" });
-    else data.bm = n;
+  if (body?.cbm != null) {
+    const n = Number(body.cbm);
+    if (!Number.isFinite(n) || n < 0) errors.push({ field: "cbm", message: "Must be a non-negative number" });
+    else data.cbm = n;
+  }
+  if (body?.net_weight_mt != null) {
+    const n = Number(body.net_weight_mt);
+    if (!Number.isFinite(n) || n < 0) errors.push({ field: "net_weight_mt", message: "Must be a non-negative number" });
+    else data.net_weight_mt = n;
+  }
+  if (body?.gross_weight_mt != null) {
+    const n = Number(body.gross_weight_mt);
+    if (!Number.isFinite(n) || n < 0) errors.push({ field: "gross_weight_mt", message: "Must be a non-negative number" });
+    else data.gross_weight_mt = n;
   }
   if (body?.bm_percentage != null) {
     const n = Number(body.bm_percentage);
@@ -79,9 +109,56 @@ export function validateUpdateShipmentBody(
   if (typeof body?.vendor_name === "string") data.vendor_name = body.vendor_name.trim() || undefined;
   if (typeof body?.warehouse_name === "string") data.warehouse_name = body.warehouse_name.trim() || undefined;
   if (typeof body?.incoterm === "string") data.incoterm = body.incoterm.trim() || undefined;
-  if (typeof body?.kawasan_berikat === "string") data.kawasan_berikat = body.kawasan_berikat.trim() || undefined;
+  if (body?.kawasan_berikat === null) {
+    data.kawasan_berikat = null;
+  } else if (typeof body?.kawasan_berikat === "string") {
+    const t = body.kawasan_berikat.trim();
+    if (t === "") data.kawasan_berikat = undefined;
+    else if (t === "Yes" || t === "No") data.kawasan_berikat = t;
+    else errors.push({ field: "kawasan_berikat", message: "Kawasan berikat must be Yes or No" });
+  }
+  if (body?.surveyor === null) {
+    data.surveyor = null;
+  } else if (typeof body?.surveyor === "string") {
+    const t = body.surveyor.trim();
+    if (t === "") data.surveyor = undefined;
+    else if (t === "Yes" || t === "No") data.surveyor = t;
+    else errors.push({ field: "surveyor", message: "Surveyor must be Yes or No" });
+  }
+  if (typeof body?.product_classification === "string") {
+    data.product_classification = body.product_classification.trim() || null;
+  } else if (body?.product_classification === null) {
+    data.product_classification = null;
+  }
   if (closedAtRaw != null && typeof closedAtRaw === "string") data.closed_at = closedAtRaw.trim();
   if (typeof body?.close_reason === "string") data.close_reason = body.close_reason.trim() || undefined;
+
+  const boolFields = ["unit_20ft", "unit_40ft", "unit_package", "unit_20_iso_tank"] as const;
+  for (const key of boolFields) {
+    const v = body?.[key];
+    if (v === undefined) continue;
+    if (typeof v === "boolean") data[key] = v;
+    else errors.push({ field: key, message: `${key} must be a boolean` });
+  }
+
+  const parseCount = (raw: unknown, field: string): number | null | undefined => {
+    if (raw === undefined) return undefined;
+    if (raw === null) return null;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) {
+      errors.push({ field, message: "Must be a non-negative integer" });
+      return undefined;
+    }
+    return n;
+  };
+  const c20 = parseCount(body?.container_count_20ft, "container_count_20ft");
+  if (c20 !== undefined) data.container_count_20ft = c20;
+  const c40 = parseCount(body?.container_count_40ft, "container_count_40ft");
+  if (c40 !== undefined) data.container_count_40ft = c40;
+  const pkg = parseCount(body?.package_count, "package_count");
+  if (pkg !== undefined) data.package_count = pkg;
+  const cIso = parseCount(body?.container_count_20_iso_tank, "container_count_20_iso_tank");
+  if (cIso !== undefined) data.container_count_20_iso_tank = cIso;
 
   if (errors.length > 0) return { ok: false, errors };
 

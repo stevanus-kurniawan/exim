@@ -28,6 +28,7 @@ function getHeaders(
 /**
  * Request to API. On non-OK responses returns error body (success: false, message, errors); does not throw.
  */
+/** Low-level request; prefer apiGet/apiPost unless you need FormData (e.g. file upload). */
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {}

@@ -79,6 +79,68 @@
   background-color: var(--color-semantic-primary-hover, #9e2c25);
 }
 
+.tableToolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: var(--spacing-3, 16px);
+  gap: var(--spacing-2, 8px);
+}
+
+.presetSelect {
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  font-size: var(--typography-fontSize-small, 14px);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-md, 8px);
+  background: var(--color-semantic-secondary-default, #f4f4f4);
+  min-width: 130px;
+}
+
+.presetInput {
+  width: 100%;
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
+  border-radius: var(--borderRadius-md, 8px);
+  font-size: var(--typography-fontSize-base, 16px);
+}
+
+.saveViewBtn {
+  background: var(--color-semantic-primary-default, #c43a31);
+  color: var(--color-semantic-primary-foreground, #ffffff);
+  border-color: var(--color-semantic-primary-default, #c43a31);
+}
+
+.saveViewBtn:hover {
+  background: var(--color-semantic-primary-hover, #9e2c25);
+  border-color: var(--color-semantic-primary-hover, #9e2c25);
+}
+
+.deleteViewBtn {
+  color: var(--color-semantic-destructive-default, #c43a31);
+}
+
+.deleteViewBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnIcon {
+  display: inline-flex;
+  width: 1rem;
+  justify-content: center;
+  font-weight: var(--typography-fontWeight-bold, 700);
+}
+
+.tableFixedHeight {
+  min-height: 560px;
+}
+
+.thWithFilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .createBtn:focus-visible {
   outline: 2px solid var(--color-primitive-border-dark, #9e9e9e);
   outline-offset: 2px;
@@ -130,4 +192,173 @@
 .pageInfo {
   font-size: var(--typography-fontSize-small, 14px);
   color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2, 8px) var(--spacing-3, 12px);
+}
+
+.filterLabel {
+  font-size: var(--typography-fontSize-small, 14px);
+  font-weight: var(--typography-fontWeight-semibold, 600);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+}
+
+.dateField {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+}
+
+.dateFieldLabel {
+  font-size: var(--typography-fontSize-xs, 12px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.dateInput {
+  padding: var(--spacing-1, 4px) var(--spacing-2, 8px);
+  font-size: var(--typography-fontSize-small, 14px);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-sm, 6px);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+}
+
+.filterApply,
+.filterClear {
+  padding: var(--spacing-1, 4px) var(--spacing-3, 12px);
+  font-size: var(--typography-fontSize-small, 14px);
+  font-weight: var(--typography-fontWeight-medium, 500);
+  border-radius: var(--borderRadius-sm, 6px);
+  cursor: pointer;
+  border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
+  background: var(--color-primitive-background-white, #ffffff);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+}
+
+.filterApply {
+  background-color: var(--color-semantic-primary-default, #c43a31);
+  border-color: var(--color-semantic-primary-default, #c43a31);
+  color: var(--color-semantic-primary-foreground, #ffffff);
+}
+
+.filterApply:hover {
+  background-color: var(--color-semantic-primary-hover, #9e2c25);
+  border-color: var(--color-semantic-primary-hover, #9e2c25);
+}
+
+.filterHint {
+  font-size: var(--typography-fontSize-xs, 12px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  max-width: 140px;
+  line-height: 1.35;
+}
+
+.poCell {
+  white-space: nowrap;
+}
+
+.poToggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  font: inherit;
+  font-weight: var(--typography-fontWeight-medium, 500);
+  color: var(--color-semantic-primary-default, #c43a31);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.poToggle:hover {
+  color: var(--color-semantic-primary-hover, #9e2c25);
+}
+
+.poToggle:focus-visible {
+  outline: 2px solid var(--color-primitive-border-dark, #9e9e9e);
+  outline-offset: 2px;
+  border-radius: var(--borderRadius-sm, 4px);
+}
+
+.poToggleIcon {
+  text-decoration: none;
+}
+
+.expandRow .expandCell {
+  padding: 0;
+  vertical-align: top;
+  background-color: var(--color-primitive-background-lighter, #fafafa);
+  border-top: none;
+}
+
+.expandPanel {
+  padding: var(--spacing-3, 12px) var(--spacing-4, 16px) var(--spacing-4, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4, 16px);
+}
+
+.expandPoBlock {
+  padding: var(--spacing-3, 12px);
+  background: var(--color-primitive-background-white, #ffffff);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-md, 8px);
+}
+
+.expandPoTitle {
+  font-size: var(--typography-fontSize-small, 14px);
+  margin-bottom: var(--spacing-2, 8px);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+}
+
+.expandPoMeta {
+  margin-left: var(--spacing-2, 8px);
+  font-weight: var(--typography-fontWeight-normal, 400);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.expandEmptyLines {
+  margin: 0;
+  font-size: var(--typography-fontSize-small, 14px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.expandItemsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--typography-fontSize-small, 14px);
+}
+
+.expandTh,
+.expandThQty,
+.expandThUnit {
+  text-align: left;
+  padding: var(--spacing-2, 8px) var(--spacing-2, 8px);
+  border-bottom: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  font-weight: var(--typography-fontWeight-semibold, 600);
+}
+
+.expandThQty,
+.expandThUnit {
+  width: 5rem;
+}
+
+.expandTdNum {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.expandItemsTable td {
+  padding: var(--spacing-2, 8px);
+  border-bottom: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  vertical-align: top;
+}
+
+.expandItemsTable tr:last-child td {
+  border-bottom: none;
 }

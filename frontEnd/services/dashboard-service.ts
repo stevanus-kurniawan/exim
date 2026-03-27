@@ -2,25 +2,16 @@
  * Dashboard API — services layer. All dashboard API calls go through here.
  */
 
-import { apiGet } from "./api-client";
-import type { ImportSummaryData, StatusCountItem } from "@/types/dashboard";
-import type { ApiResponse } from "@/types/api";
 import { listPo } from "./po-service";
 import { listShipments } from "./shipments-service";
+import { apiGet } from "./api-client";
+import type { ApiResponse } from "@/types/api";
+import type {
+  ProductSpecificationSummaryItem,
+  ProductSpecificationSummaryQuery,
+} from "@/types/dashboard";
 
-export async function getImportSummary(
-  accessToken: string | null
-): Promise<ApiResponse<ImportSummaryData>> {
-  return apiGet<ImportSummaryData>("dashboard/import-summary", accessToken);
-}
-
-export async function getImportStatusSummary(
-  accessToken: string | null
-): Promise<ApiResponse<StatusCountItem[]>> {
-  return apiGet<StatusCountItem[]>("dashboard/import-status-summary", accessToken);
-}
-
-/** Counts for dashboard: new PO detected (NEW_PO_DETECTED), awaiting assignment (NOTIFIED). Rejects if API errors. */
+/** Counts for dashboard: new PO detected (NEW_PO_DETECTED), claimed awaiting allocation (CLAIMED). Rejects if API errors. */
 export async function getPoDashboardCounts(accessToken: string | null): Promise<{
   newPoDetected: number;
   awaitingAssignment: number;
@@ -30,7 +21,7 @@ export async function getPoDashboardCounts(accessToken: string | null): Promise<
   if (!accessToken) return { newPoDetected, awaitingAssignment };
   const [r1, r2] = await Promise.all([
     listPo({ page: 1, limit: 1, intake_status: "NEW_PO_DETECTED" }, accessToken),
-    listPo({ page: 1, limit: 1, intake_status: "NOTIFIED" }, accessToken),
+    listPo({ page: 1, limit: 1, intake_status: "CLAIMED" }, accessToken),
   ]);
   if (!r1.success) throw new Error(r1.message ?? "Failed to load PO counts");
   if (!r2.success) throw new Error(r2.message ?? "Failed to load PO counts");
@@ -62,4 +53,18 @@ export async function getShipmentDashboardCounts(accessToken: string | null): Pr
   if (rDelivered.meta && typeof rDelivered.meta.total === "number") delivered = rDelivered.meta.total;
   activeShipments = total - delivered;
   return { activeShipments, customsClearance, delivered };
+}
+
+export async function getProductSpecificationSummary(
+  query: ProductSpecificationSummaryQuery,
+  accessToken: string | null
+): Promise<ApiResponse<ProductSpecificationSummaryItem[]>> {
+  const params = new URLSearchParams();
+  if (query.month != null) params.set("month", String(query.month));
+  if (query.year != null) params.set("year", String(query.year));
+  const qs = params.toString();
+  return apiGet<ProductSpecificationSummaryItem[]>(
+    `dashboard/product-specification-summary${qs ? `?${qs}` : ""}`,
+    accessToken
+  );
 }

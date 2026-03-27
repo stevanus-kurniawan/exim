@@ -1,0 +1,62 @@
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  padding: var(--spacing-1, 4px) var(--spacing-2, 8px);
+  font-size: var(--typography-fontSize-xs, 12px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  background: var(--color-primitive-background-lighter, #fafafa);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-sm, 6px);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  border-color: var(--color-primitive-border-medium, #c4c4c4);
+}
+
+.kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
+.input {
+  width: 100%;
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
+  border-radius: var(--borderRadius-md, 8px);
+}
+
+.list {
+  display: grid;
+  gap: var(--spacing-1, 4px);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-2, 8px);
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-md, 8px);
+  background: var(--color-primitive-background-white, #ffffff);
+  cursor: pointer;
+  text-align: left;
+}
+
+.item:hover {
+  background: var(--color-primitive-background-lighter, #fafafa);
+}
+
+.hint {
+  font-size: var(--typography-fontSize-xs, 12px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.empty {
+  margin: 0;
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  font-size: var(--typography-fontSize-small, 14px);
+}
+

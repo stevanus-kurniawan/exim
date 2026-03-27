@@ -3,7 +3,7 @@
 import { formatDateTime } from "@/lib/format-date";
 import styles from "./Timeline.module.css";
 
-export type TimelineItemVariant = "complete" | "active" | "pending";
+export type TimelineItemVariant = "complete" | "active" | "next" | "pending";
 
 export interface TimelineItem {
   sequence: number;
@@ -11,8 +11,10 @@ export interface TimelineItem {
   changed_at: string;
   changed_by: string;
   remarks: string | null;
-  /** Visual state: complete (gray), active (accent), pending (muted). Defaults to "complete". */
+  /** Visual state: complete (done), active (current), next (upcoming), pending (later). */
   variant?: TimelineItemVariant;
+  /** Optional legacy prop; timeline colors now come from variant state. */
+  statusTone?: unknown;
 }
 
 export interface TimelineProps {
@@ -39,6 +41,16 @@ export function Timeline({
     <ol className={styles.list} aria-label="Status timeline">
       {items.map((item) => {
         const variant = item.variant ?? "complete";
+        const statusToneClass =
+          variant === "active"
+            ? styles.statusActive
+            : variant === "next"
+              ? styles.statusNext
+            : variant === "complete"
+              ? styles.statusComplete
+            : variant === "pending"
+              ? styles.statusPending
+              : "";
         return (
           <li
             key={`${item.sequence}-${item.changed_at}-${item.status}`}
@@ -47,15 +59,27 @@ export function Timeline({
           >
             <span
               className={`${styles.marker} ${
-                variant === "active" ? styles.markerActive : variant === "pending" ? styles.markerPending : styles.markerComplete
+                variant === "active"
+                  ? styles.markerActive
+                  : variant === "next"
+                    ? styles.markerNext
+                    : variant === "pending"
+                      ? styles.markerPending
+                      : styles.markerComplete
               }`}
               aria-hidden
             />
             <div className={styles.content}>
-              <span className={styles.status}>{formatStatus(item.status)}</span>
+              <span className={`${styles.status} ${statusToneClass}`}>{formatStatus(item.status)}</span>
               <span className={styles.meta}>
-                {formatDate(item.changed_at)}
-                {item.changed_by ? ` · ${item.changed_by}` : ""}
+                {item.changed_at?.trim() || item.changed_by?.trim() ? (
+                  <>
+                    {item.changed_at?.trim() ? formatDate(item.changed_at) : "—"}
+                    {item.changed_by?.trim() ? ` · ${item.changed_by}` : ""}
+                  </>
+                ) : (
+                  "—"
+                )}
               </span>
               {item.remarks && <p className={styles.remarks}>{item.remarks}</p>}
             </div>

@@ -15,7 +15,6 @@ function parseItems(body: unknown): PoIntakeItemDto[] | undefined {
       qty: typeof o.qty === "number" ? o.qty : undefined,
       unit: typeof o.unit === "string" ? o.unit : undefined,
       value: typeof o.value === "number" ? o.value : undefined,
-      kurs: typeof o.kurs === "number" ? o.kurs : undefined,
     };
   });
 }
@@ -43,9 +42,17 @@ export function validateCreateIntakeBody(
     supplier_name,
   };
   if (typeof body?.plant === "string") data.plant = body.plant.trim();
+  if (typeof body?.pt === "string") data.pt = body.pt.trim();
   if (typeof body?.delivery_location === "string") data.delivery_location = body.delivery_location.trim();
   if (typeof body?.incoterm_location === "string") data.incoterm_location = body.incoterm_location.trim();
-  if (typeof body?.kawasan_berikat === "string") data.kawasan_berikat = body.kawasan_berikat.trim();
+  if (typeof body?.kawasan_berikat === "string") {
+    const t = body.kawasan_berikat.trim();
+    if (t) {
+      if (/^yes$/i.test(t)) data.kawasan_berikat = "Yes";
+      else if (/^no$/i.test(t)) data.kawasan_berikat = "No";
+      else data.kawasan_berikat = t;
+    }
+  }
   if (typeof body?.currency === "string") data.currency = body.currency.trim();
   const items = parseItems(body?.items);
   if (items && items.length > 0) data.items = items;

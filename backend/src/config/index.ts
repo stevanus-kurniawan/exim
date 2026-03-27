@@ -37,7 +37,7 @@ export const config = {
   jwt: {
     accessSecret: getEnvOptional("JWT_ACCESS_SECRET"),
     refreshSecret: getEnvOptional("JWT_REFRESH_SECRET"),
-    accessExpiresIn: getEnvOptional("JWT_ACCESS_EXPIRES_IN", "15m"),
+    accessExpiresIn: getEnvOptional("JWT_ACCESS_EXPIRES_IN", "1h"),
     refreshExpiresIn: getEnvOptional("JWT_REFRESH_EXPIRES_IN", "7d"),
   },
   storage: {

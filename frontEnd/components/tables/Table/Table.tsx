@@ -3,9 +3,14 @@
 import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import styles from "./Table.module.css";
 
-export function Table({ className = "", children, ...props }: HTMLAttributes<HTMLTableElement>) {
+export type TableProps = HTMLAttributes<HTMLTableElement> & {
+  /** Extra class on the scroll wrapper (e.g. overflow: visible for nested full-bleed rows). */
+  wrapperClassName?: string;
+};
+
+export function Table({ className = "", wrapperClassName = "", children, ...props }: TableProps) {
   return (
-    <div className={styles.wrapper}>
+    <div className={`${styles.wrapper} ${wrapperClassName}`.trim()}>
       <table className={`${styles.table} ${className}`} {...props}>
         {children}
       </table>

@@ -59,6 +59,7 @@
   display: inline-flex;
   align-items: center;
   padding: var(--spacing-2, 8px) var(--spacing-4, 24px);
+  font-family: inherit;
   font-size: var(--typography-fontSize-base, 16px);
   font-weight: var(--typography-fontWeight-semibold, 600);
   color: var(--color-semantic-primary-foreground, #ffffff);
@@ -77,6 +78,99 @@
 
 .createBtn:hover {
   background-color: var(--color-semantic-primary-hover, #9e2c25);
+  /* Override globals.css a:hover (primary-hover text) so hover matches .searchSubmit */
+  color: var(--color-semantic-primary-foreground, #ffffff);
+}
+
+.refreshBtn {
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  justify-content: center;
+}
+
+.refreshIcon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.tableToolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: var(--spacing-3, 16px);
+  gap: var(--spacing-2, 8px);
+}
+
+.presetSelect {
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  font-size: var(--typography-fontSize-small, 14px);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-md, 8px);
+  background: var(--color-semantic-secondary-default, #f4f4f4);
+  min-width: 130px;
+}
+
+.presetInput {
+  width: 100%;
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  border: 1px solid var(--color-primitive-border-medium, #c4c4c4);
+  border-radius: var(--borderRadius-md, 8px);
+  font-size: var(--typography-fontSize-base, 16px);
+}
+
+.saveViewBtn {
+  background: var(--color-semantic-primary-default, #c43a31);
+  color: var(--color-semantic-primary-foreground, #ffffff);
+  border-color: var(--color-semantic-primary-default, #c43a31);
+}
+
+.saveViewBtn:hover {
+  background: var(--color-semantic-primary-hover, #9e2c25);
+  border-color: var(--color-semantic-primary-hover, #9e2c25);
+}
+
+.deleteViewBtn {
+  color: var(--color-semantic-destructive-default, #c43a31);
+}
+
+.deleteViewBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnIcon {
+  display: inline-flex;
+  width: 1rem;
+  justify-content: center;
+  font-weight: var(--typography-fontWeight-bold, 700);
+}
+
+.tableFixedHeight {
+  /* Keep list area stable like spreadsheet (no big jump when few rows). */
+  min-height: 520px;
+}
+
+.thWithFilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filterClear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  font-size: var(--typography-fontSize-small, 14px);
+  font-weight: var(--typography-fontWeight-medium, 500);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+  background: var(--color-primitive-background-white, #ffffff);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-md, 8px);
+  cursor: pointer;
+}
+
+.filterClear:hover {
+  border-color: var(--color-primitive-border-medium, #c4c4c4);
 }
 
 .createBtn:focus-visible {

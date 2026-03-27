@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
+import { useTableColumnVisibility, type TableColumnDef } from "@/hooks/use-table-column-visibility";
 import { listPo } from "@/services/po-service";
 import { Card } from "@/components/cards";
+import { LoadingSkeleton } from "@/components/feedback";
 import { Badge } from "@/components/badges";
 import { PageHeader, ActionBar, EmptyState } from "@/components/navigation";
 import {
@@ -15,20 +17,48 @@ import {
   TableRow,
   TableCell,
   TableHeaderCell,
+  TableColumnPicker,
+  TableColumnFilterPicker,
 } from "@/components/tables";
 import { intakeStatusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
+import { formatPoStatusLabel } from "@/lib/po-status-label";
 import { isApiError } from "@/types/api";
 import type { PoListItem } from "@/types/po";
 import type { ApiSuccess } from "@/types/api";
+import { RefreshIcon } from "@/components/icons/RefreshIcon";
 import styles from "./PoList.module.css";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 
-function formatDetectedAt(created_at: string): string {
+const PO_LIST_TABLE_COLUMNS_KEY = "eos.dash.poList.tableColumns.v3";
+
+/** All scalar PO detail fields (lines / linked shipments are not columns). */
+const PO_TABLE_COLUMNS: TableColumnDef[] = [
+  { id: "po_number", label: "PO number", locked: true },
+  { id: "external_id", label: "External ID" },
+  { id: "pt", label: "PT" },
+  { id: "plant", label: "Plant" },
+  { id: "supplier", label: "Supplier" },
+  { id: "delivery_location", label: "Delivery location" },
+  { id: "incoterm_location", label: "Incoterms" },
+  { id: "kawasan_berikat", label: "Kawasan berikat" },
+  { id: "currency", label: "Currency" },
+  { id: "intake_status", label: "PO status" },
+  { id: "taken_by_user_id", label: "Taken by (user ID)", defaultVisible: false },
+  { id: "taken_by_name", label: "Taken by" },
+  { id: "taken_at", label: "Taken at" },
+  { id: "created_at", label: "Created at" },
+  { id: "updated_at", label: "Updated at" },
+  { id: "actions", label: "Actions", locked: true },
+];
+
+function formatIsoDate(iso: string | null | undefined, dateOnly: boolean): string {
+  if (iso == null || String(iso).trim() === "") return "—";
   try {
-    const d = new Date(created_at);
-    return isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return dateOnly ? d.toLocaleDateString() : d.toLocaleString();
   } catch {
     return "—";
   }
@@ -38,7 +68,12 @@ export function PoList() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const statusFromUrl = searchParams.get("intake_status") ?? undefined;
+  const searchFromUrl = searchParams.get("search") ?? "";
   const { accessToken } = useAuth();
+  const { visibleById, toggleColumn, resetColumns, columns: poColumnDefs } = useTableColumnVisibility(
+    PO_LIST_TABLE_COLUMNS_KEY,
+    PO_TABLE_COLUMNS
+  );
   const [items, setItems] = useState<PoListItem[]>([]);
   const [meta, setMeta] = useState<{ page: number; limit: number; total: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,6 +81,8 @@ export function PoList() {
   const [page, setPage] = useState(DEFAULT_PAGE);
   const [searchInput, setSearchInput] = useState("");
   const [searchParam, setSearchParam] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [openFilterColumnId, setOpenFilterColumnId] = useState<string | null>(null);
 
   const fetchList = useCallback(() => {
     if (!accessToken) {
@@ -68,7 +105,16 @@ export function PoList() {
           return;
         }
         const success = res as ApiSuccess<PoListItem[]>;
-        setItems(success.data ?? []);
+        setItems(
+          (success.data ?? []).map((r) => ({
+            ...r,
+            kawasan_berikat: r.kawasan_berikat ?? null,
+            currency: r.currency ?? null,
+            taken_by_user_id: r.taken_by_user_id ?? null,
+            taken_by_name: r.taken_by_name ?? null,
+            updated_at: r.updated_at ?? r.created_at,
+          }))
+        );
         const m = success.meta as { page: number; limit: number; total: number } | undefined;
         if (m) setMeta(m);
       })
@@ -80,6 +126,12 @@ export function PoList() {
     fetchList();
   }, [fetchList]);
 
+  useEffect(() => {
+    setSearchInput(searchFromUrl);
+    setSearchParam(searchFromUrl);
+    setPage(1);
+  }, [searchFromUrl]);
+
   const totalPages = meta ? Math.ceil(meta.total / meta.limit) : 0;
 
   function handleRowClick(id: string) {
@@ -90,6 +142,128 @@ export function PoList() {
     e.preventDefault();
     setSearchParam(searchInput);
     setPage(1);
+  }
+
+  const visiblePoColumns = poColumnDefs.filter((c) => visibleById[c.id] !== false);
+
+  function poCellValueForFilter(columnId: string, row: PoListItem): string {
+    switch (columnId) {
+      case "po_number":
+        return row.po_number ?? "";
+      case "external_id":
+        return row.external_id ?? "";
+      case "pt":
+        return row.pt ?? "";
+      case "plant":
+        return row.plant ?? "";
+      case "supplier":
+        return row.supplier_name ?? "";
+      case "delivery_location":
+        return row.delivery_location ?? "";
+      case "incoterm_location":
+        return row.incoterm_location ?? "";
+      case "kawasan_berikat":
+        return row.kawasan_berikat ?? "";
+      case "currency":
+        return row.currency ?? "";
+      case "intake_status":
+        return formatPoStatusLabel(row.intake_status);
+      case "taken_by_user_id":
+        return row.taken_by_user_id ?? "";
+      case "taken_by_name":
+        return row.taken_by_name ?? "";
+      case "taken_at":
+        return formatIsoDate(row.taken_at, false);
+      case "created_at":
+        return formatIsoDate(row.created_at, true);
+      case "updated_at":
+        return formatIsoDate(row.updated_at, false);
+      default:
+        return "";
+    }
+  }
+
+  const columnFilterOptions = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const col of PO_TABLE_COLUMNS) {
+      if (col.id === "actions") continue;
+      const set = new Set<string>();
+      for (const row of items) {
+        const v = poCellValueForFilter(col.id, row).trim();
+        set.add(v === "" ? "—" : v);
+      }
+      out[col.id] = Array.from(set).sort((a, b) => a.localeCompare(b));
+    }
+    return out;
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    const active = Object.entries(columnFilters).filter(([, v]) => Array.isArray(v) && v.length > 0);
+    if (active.length === 0) return items;
+    return items.filter((row) => {
+      return active.every(([colId, selected]) => {
+        const v = poCellValueForFilter(colId, row).trim();
+        const normalized = v === "" ? "—" : v;
+        return selected.includes(normalized);
+      });
+    });
+  }, [items, columnFilters]);
+
+  function renderPoRowCell(column: TableColumnDef, row: PoListItem) {
+    switch (column.id) {
+      case "po_number":
+        return (
+          <TableCell key={column.id}>
+            <Link href={`/dashboard/po/${row.id}`} className={styles.cellLink} onClick={(e) => e.stopPropagation()}>
+              {row.po_number}
+            </Link>
+          </TableCell>
+        );
+      case "pt":
+        return <TableCell key={column.id}>{row.pt ?? "—"}</TableCell>;
+      case "plant":
+        return <TableCell key={column.id}>{row.plant ?? "—"}</TableCell>;
+      case "supplier":
+        return <TableCell key={column.id}>{row.supplier_name ?? "—"}</TableCell>;
+      case "external_id":
+        return <TableCell key={column.id}>{row.external_id?.trim() || "—"}</TableCell>;
+      case "delivery_location":
+        return <TableCell key={column.id}>{row.delivery_location?.trim() || "—"}</TableCell>;
+      case "incoterm_location":
+        return <TableCell key={column.id}>{row.incoterm_location?.trim() || "—"}</TableCell>;
+      case "kawasan_berikat":
+        return <TableCell key={column.id}>{row.kawasan_berikat?.trim() || "—"}</TableCell>;
+      case "currency":
+        return <TableCell key={column.id}>{row.currency?.trim() || "—"}</TableCell>;
+      case "taken_by_user_id":
+        return <TableCell key={column.id}>{row.taken_by_user_id?.trim() || "—"}</TableCell>;
+      case "taken_by_name":
+        return <TableCell key={column.id}>{row.taken_by_name?.trim() || "—"}</TableCell>;
+      case "taken_at":
+        return <TableCell key={column.id}>{formatIsoDate(row.taken_at, false)}</TableCell>;
+      case "created_at":
+        return <TableCell key={column.id}>{formatIsoDate(row.created_at, true)}</TableCell>;
+      case "updated_at":
+        return <TableCell key={column.id}>{formatIsoDate(row.updated_at, false)}</TableCell>;
+      case "intake_status":
+        return (
+          <TableCell key={column.id}>
+            <Badge variant={intakeStatusToBadgeVariant(row.intake_status)}>{formatPoStatusLabel(row.intake_status)}</Badge>
+          </TableCell>
+        );
+      case "actions":
+        return (
+          <TableCell key={column.id}>
+            <div className={styles.actionCell} onClick={(e) => e.stopPropagation()}>
+              <Link href={`/dashboard/po/${row.id}`} className={styles.actionBtn}>
+                View
+              </Link>
+            </div>
+          </TableCell>
+        );
+      default:
+        return null;
+    }
   }
 
   return (
@@ -121,16 +295,22 @@ export function PoList() {
             <Link href="/dashboard/po/new" className={styles.createBtn}>
               Create Purchase Order
             </Link>
-            <Link href="/dashboard/po" className={styles.createBtn}>
-              Refresh
-            </Link>
+            <button
+              type="button"
+              className={`${styles.createBtn} ${styles.refreshBtn}`}
+              onClick={() => fetchList()}
+              disabled={loading}
+              aria-label="Refresh list"
+            >
+              <RefreshIcon className={styles.refreshIcon} />
+            </button>
           </div>
         }
       />
 
       {error && <p className={styles.error}>{error}</p>}
       {loading ? (
-        <p>Loading…</p>
+        <LoadingSkeleton lines={6} />
       ) : (
         <Card>
           {items.length === 0 ? (
@@ -144,61 +324,70 @@ export function PoList() {
             />
           ) : (
             <>
-              <Table>
+              <div className={styles.tableToolbar}>
+                <button
+                  type="button"
+                  className={styles.filterClear}
+                  onClick={() => setColumnFilters({})}
+                  disabled={Object.values(columnFilters).every((v) => !Array.isArray(v) || v.length === 0)}
+                >
+                  Clear column filters
+                </button>
+                <TableColumnPicker
+                  columns={PO_TABLE_COLUMNS}
+                  visibleById={visibleById}
+                  onToggle={toggleColumn}
+                  onReset={resetColumns}
+                />
+              </div>
+              <Table wrapperClassName={styles.tableFixedHeight}>
                 <TableHead>
                   <TableRow>
-                    <TableHeaderCell>PO number</TableHeaderCell>
-                    <TableHeaderCell>Plant</TableHeaderCell>
-                    <TableHeaderCell>Supplier</TableHeaderCell>
-                    <TableHeaderCell>Incoterms</TableHeaderCell>
-                    <TableHeaderCell>Detected at</TableHeaderCell>
-                    <TableHeaderCell>Intake status</TableHeaderCell>
-                    <TableHeaderCell>Actions</TableHeaderCell>
+                    {visiblePoColumns.map((c) => (
+                      <TableHeaderCell key={c.id}>
+                        <span className={styles.thWithFilter}>
+                          <span>{c.label}</span>
+                          {c.id !== "actions" && (
+                            <TableColumnFilterPicker
+                              columnLabel={c.label}
+                              options={columnFilterOptions[c.id] ?? []}
+                              selected={columnFilters[c.id] ?? []}
+                              onChange={(nextSelected) =>
+                                setColumnFilters((prev) => ({ ...prev, [c.id]: nextSelected }))
+                              }
+                              open={openFilterColumnId === c.id}
+                              onOpenChange={(open) => setOpenFilterColumnId(open ? c.id : null)}
+                            />
+                          )}
+                        </span>
+                      </TableHeaderCell>
+                    ))}
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {items.map((row) => (
+                  {filteredItems.map((row) => (
                     <TableRow
                       key={row.id}
                       className={styles.clickableRow}
-                      role="button"
-                      tabIndex={0}
                       onClick={() => handleRowClick(row.id)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
+                        if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
                           e.preventDefault();
                           handleRowClick(row.id);
                         }
                       }}
-                      aria-label={`View Purchase Order ${row.po_number}`}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Open Purchase Order ${row.po_number}`}
                     >
-                      <TableCell>
-                        <Link
-                          href={`/dashboard/po/${row.id}`}
-                          className={styles.cellLink}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {row.po_number}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{row.plant ?? "—"}</TableCell>
-                      <TableCell>{row.supplier_name ?? "—"}</TableCell>
-                      <TableCell>{row.incoterm_location ?? "—"}</TableCell>
-                      <TableCell>{formatDetectedAt(row.created_at)}</TableCell>
-                      <TableCell>
-                        <Badge variant={intakeStatusToBadgeVariant(row.intake_status)}>
-                          {formatStatusLabel(row.intake_status)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className={styles.actionCell} onClick={(e) => e.stopPropagation()}>
-                          <Link href={`/dashboard/po/${row.id}`} className={styles.actionBtn}>
-                            View
-                          </Link>
-                        </div>
-                      </TableCell>
+                      {visiblePoColumns.map((c) => renderPoRowCell(c, row))}
                     </TableRow>
                   ))}
+                  {filteredItems.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={visiblePoColumns.length}>No rows match current column filters.</TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
 

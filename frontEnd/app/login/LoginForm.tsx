@@ -6,12 +6,14 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Input, Button } from "@/components/forms";
 import { DEFAULT_AFTER_LOGIN_PATH } from "@/lib/constants";
+import { useToast } from "@/components/providers/ToastProvider";
 import styles from "./LoginForm.module.css";
 
 export function LoginForm() {
   const searchParams = useSearchParams();
   const from = searchParams.get("from") ?? DEFAULT_AFTER_LOGIN_PATH;
   const { user, initialized, login, loading } = useAuth();
+  const { pushToast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,11 +31,14 @@ export function LoginForm() {
     setFieldErrors({});
     const result = await login(email, password);
     if (result.ok) {
+      pushToast("Signed in successfully.", "success");
       // Full page redirect so the browser sends the new cookies and dashboard loads with auth
       window.location.href = from;
       return;
     }
-    setError(result.error ?? "Login failed");
+    const errMsg = result.error ?? "Login failed";
+    pushToast(errMsg, "error");
+    setError(errMsg);
     if (result.errors?.length) {
       const byField: Record<string, string> = {};
       for (const { field, message } of result.errors) byField[field] = message;
@@ -76,11 +81,6 @@ export function LoginForm() {
             {loading ? "Signing in…" : "Sign in"}
           </Button>
         </form>
-        <p className={styles.footer}>
-          <Link href="/register" className={styles.backLink}>
-            Create an account
-          </Link>
-        </p>
       </div>
     </div>
   );

@@ -7,6 +7,8 @@ export interface AuthUser {
   name: string;
   email: string;
   role: string;
+  permission_overrides: string[];
+  effective_permissions: string[];
 }
 
 export interface LoginResponseData {

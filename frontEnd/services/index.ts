@@ -9,27 +9,17 @@ export {
 export type { RequestOptions } from "./api-client";
 export { login, logout, refresh, getMe } from "./auth-service";
 export {
-  getImportSummary,
-  getImportStatusSummary,
   getPoDashboardCounts,
   getShipmentDashboardCounts,
+  getProductSpecificationSummary,
 } from "./dashboard-service";
-export {
-  listImportTransactions,
-  getTransactionDetail,
-  getTimeline,
-  getStatusSummary,
-  listDocuments,
-  uploadDocument,
-  listNotes,
-  addNote,
-} from "./import-transactions-service";
 export {
   listPo,
   getPoDetail,
   takeOwnership,
   createShipmentFromPo,
   couplePoToShipment,
+  lookupPoByPoNumber,
 } from "./po-service";
 export {
   listShipments,

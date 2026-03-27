@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { can } from "@/lib/permissions";
 import styles from "./Sidebar.module.css";
 
 export interface NavItem {
@@ -11,11 +13,13 @@ export interface NavItem {
   comingSoon?: boolean;
 }
 
-const MAIN_NAV: NavItem[] = [
+const BASE_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/dashboard/po", label: "Purchase Order" },
   { href: "/dashboard/shipments", label: "Shipments" },
 ];
+
+const MANAGE_USERS = "MANAGE_USERS";
 
 const PLACEHOLDER_NAV: NavItem[] = [
   { href: "#", label: "Reports", comingSoon: true },
@@ -63,6 +67,15 @@ export interface SidebarProps {
 
 export function Sidebar({ isMobileOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  const mainNav = useMemo(() => {
+    const items = [...BASE_NAV];
+    if (can(user, MANAGE_USERS)) {
+      items.push({ href: "/dashboard/users", label: "User management" });
+    }
+    return items;
+  }, [user]);
 
   useEffect(() => {
     if (isMobileOpen && onClose) onClose();
@@ -75,7 +88,7 @@ export function Sidebar({ isMobileOpen = false, onClose }: SidebarProps) {
     <aside className={asideClass} aria-label="Main navigation">
       <nav className={styles.nav}>
         <ul className={styles.list}>
-          {MAIN_NAV.map((item) => {
+          {mainNav.map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href + "/"));

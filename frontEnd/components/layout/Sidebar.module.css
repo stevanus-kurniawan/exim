@@ -53,7 +53,7 @@
 }
 
 .navItem.active {
-  background-color: var(--color-primitive-background-lighter, #fafafa);
+  background-color: rgba(196, 58, 49, 0.08);
   color: var(--color-semantic-primary-default, #c43a31);
   border-left-color: var(--color-semantic-primary-default, #c43a31);
 }

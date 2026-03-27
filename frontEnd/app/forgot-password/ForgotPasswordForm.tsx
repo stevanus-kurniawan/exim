@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { Input, Button } from "@/components/forms";
 import { forgotPassword as forgotPasswordApi } from "@/services/auth-service";
+import { useToast } from "@/components/providers/ToastProvider";
 import { isApiError } from "@/types/api";
 import styles from "./ForgotPasswordForm.module.css";
 
 export function ForgotPasswordForm() {
+  const { pushToast } = useToast();
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -23,6 +25,9 @@ export function ForgotPasswordForm() {
       const res = await forgotPasswordApi(email);
       if (isApiError(res)) {
         setError(res.message ?? "Request failed");
+        const msg = res.message ?? "Request failed";
+        setError(msg);
+        pushToast(msg, "error");
         if (res.errors?.length) {
           const byField: Record<string, string> = {};
           for (const { field, message } of res.errors) byField[field] = message;
@@ -30,9 +35,12 @@ export function ForgotPasswordForm() {
         }
         return;
       }
+      pushToast("If an account exists for this email, you will receive a reset link.", "info");
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      const msg = err instanceof Error ? err.message : "Request failed";
+      setError(msg);
+      pushToast(msg, "error");
     } finally {
       setLoading(false);
     }

@@ -42,14 +42,19 @@ export interface CreateShipmentDto {
   insurance_no?: string;
   coo?: string;
   incoterm_amount?: number;
-  bm?: number;
+  cbm?: number;
   bm_percentage?: number;
   kawasan_berikat?: string;
+  product_classification?: string;
 }
 
 export interface UpdateShipmentDto {
   etd?: string;
   eta?: string;
+  atd?: string;
+  ata?: string;
+  depo?: boolean;
+  depo_location?: string | null;
   remarks?: string;
   pib_type?: string;
   no_request_pib?: string;
@@ -60,7 +65,9 @@ export interface UpdateShipmentDto {
   insurance_no?: string;
   coo?: string;
   incoterm_amount?: number;
-  bm?: number;
+  cbm?: number;
+  net_weight_mt?: number;
+  gross_weight_mt?: number;
   bm_percentage?: number;
   origin_port_name?: string;
   origin_port_country?: string;
@@ -73,7 +80,17 @@ export interface UpdateShipmentDto {
   incoterm?: string;
   closed_at?: string;
   close_reason?: string;
-  kawasan_berikat?: string;
+  kawasan_berikat?: string | null;
+  surveyor?: string | null;
+  product_classification?: string | null;
+  unit_20ft?: boolean;
+  unit_40ft?: boolean;
+  unit_package?: boolean;
+  unit_20_iso_tank?: boolean;
+  container_count_20ft?: number | null;
+  container_count_40ft?: number | null;
+  package_count?: number | null;
+  container_count_20_iso_tank?: number | null;
 }
 
 export interface CloseShipmentDto {
@@ -89,6 +106,30 @@ export interface ListShipmentsQuery {
   po_number?: string;
   from_date?: string;
   to_date?: string;
+  /** Inclusive; filters shipments that have at least one active linked PO whose effective PO date is on or after this day (uses `Import_purchase_order.po_date`, else intake `created_at` UTC date). */
+  po_from_date?: string;
+  /** Inclusive; same semantics as `po_from_date` for upper bound. */
+  po_to_date?: string;
+}
+
+/** Line summary for shipment list PO expansion. */
+export interface ShipmentListPoLineItem {
+  item_description: string | null;
+  /** Quantity on the PO line. */
+  qty_po: number | null;
+  /** Quantity delivered on this shipment for this line; null if not recorded. */
+  delivery_qty: number | null;
+  unit: string | null;
+}
+
+/** Linked PO block returned on shipment list (for multi-PO expand). */
+export interface ShipmentListLinkedPo {
+  intake_id: string;
+  po_number: string;
+  pt: string | null;
+  plant: string | null;
+  taken_by_name: string | null;
+  items: ShipmentListPoLineItem[];
 }
 
 export interface ShipmentRow {
@@ -110,6 +151,10 @@ export interface ShipmentRow {
   destination_port_country: string | null;
   etd: Date | null;
   eta: Date | null;
+  atd: Date | null;
+  ata: Date | null;
+  depo: boolean | null;
+  depo_location: string | null;
   current_status: string;
   closed_at: Date | null;
   close_reason: string | null;
@@ -125,20 +170,49 @@ export interface ShipmentRow {
   insurance_no: string | null;
   coo: string | null;
   incoterm_amount: number | null;
+  cbm: number | null;
+  net_weight_mt: number | null;
+  gross_weight_mt: number | null;
   bm: number | null;
   bm_percentage: number | null;
   kawasan_berikat: string | null;
+  surveyor: string | null;
+  product_classification: string | null;
+  unit_20ft: boolean;
+  unit_40ft: boolean;
+  unit_package: boolean;
+  unit_20_iso_tank: boolean;
+  container_count_20ft: number | null;
+  container_count_40ft: number | null;
+  package_count: number | null;
+  container_count_20_iso_tank: number | null;
 }
 
 export interface ShipmentListItem {
   id: string;
   shipment_number: string;
   supplier_name: string | null;
+  /** Same as vendor on shipment; kept for list column "Vendor". */
+  vendor_name: string | null;
+  /** Shipment incoterm (from shipment detail). */
+  incoterm: string | null;
+  pib_type: string | null;
+  shipment_method: string | null;
+  product_classification: string | null;
+  ship_by: string | null;
+  forwarder_name: string | null;
   origin_port_name: string | null;
   destination_port_name: string | null;
   current_status: string;
+  etd: string | null;
   eta: string | null;
-  linked_po_count?: number;
+  linked_po_count: number;
+  /** Full name of user who took ownership of linked PO. */
+  pic_name: string | null;
+  /** PT / plant shown on the row: first linked PO when multiple may differ. */
+  display_pt: string | null;
+  display_plant: string | null;
+  linked_pos: ShipmentListLinkedPo[];
 }
 
 export interface ShipmentDetail {
@@ -160,12 +234,18 @@ export interface ShipmentDetail {
   destination_port_country: string | null;
   etd: string | null;
   eta: string | null;
+  atd: string | null;
+  ata: string | null;
+  depo: boolean | null;
+  depo_location: string | null;
   current_status: string;
   closed_at: string | null;
   close_reason: string | null;
   remarks: string | null;
   created_at: string;
   updated_at: string;
+  /** Full name of user who took ownership of linked PO. */
+  pic_name: string | null;
   pib_type: string | null;
   no_request_pib: string | null;
   nopen: string | null;
@@ -175,14 +255,32 @@ export interface ShipmentDetail {
   insurance_no: string | null;
   coo: string | null;
   incoterm_amount: number | null;
-  bm: number | null;
-  bm_percentage: number | null;
+  cbm: number | null;
+  net_weight_mt: number | null;
+  gross_weight_mt: number | null;
   kawasan_berikat: string | null;
-  /** Total amount of all items (linked POs). Used for PPN/PPH/PDRI. */
+  surveyor: string | null;
+  product_classification: string | null;
+  bm_percentage: number | null;
+  unit_20ft: boolean;
+  unit_40ft: boolean;
+  unit_package: boolean;
+  unit_20_iso_tank: boolean;
+  container_count_20ft: number | null;
+  container_count_40ft: number | null;
+  package_count: number | null;
+  container_count_20_iso_tank: number | null;
+  /** Sum in IDR for this shipment: Σ((delivered_qty × unit_price) × currency_rate). */
   total_items_amount: number;
-  /** PPN = 11% × total_items_amount */
+  /** BM = (bm_percentage / 100) × total_items_amount (system-calculated). */
+  bm: number;
+  /** Effective PPN rate (percent) from server config (PPN_PERCENTAGE). */
+  ppn_percentage: number;
+  /** PPN = (ppn_percentage / 100) × (total_items_amount + BM). */
   ppn: number;
-  /** PPH = 2.5% × total_items_amount */
+  /** Effective PPH rate (percent) from server config (PPH_PERCENTAGE). */
+  pph_percentage: number;
+  /** PPH = (pph_percentage / 100) × (total_items_amount + BM). */
   pph: number;
   /** PDRI = BM + PPN + PPH */
   pdri: number;
@@ -197,6 +295,7 @@ export interface LinkedPoLineReceived {
 export interface LinkedPoSummary {
   intake_id: string;
   po_number: string;
+  pt: string | null;
   plant: string | null;
   supplier_name: string;
   incoterm_location: string | null;
@@ -205,6 +304,7 @@ export interface LinkedPoSummary {
   currency_rate: number | null;
   coupled_at: string;
   coupled_by: string;
+  taken_by_name: string | null;
   line_received: LinkedPoLineReceived[];
 }
 
@@ -245,6 +345,28 @@ export interface TimelineEntry {
   changed_at: string;
   changed_by: string;
   remarks: string | null;
+}
+
+/** Unified activity log row (status, notes, PO link/unlink, creation). */
+export interface ShipmentActivityItem {
+  id: string;
+  type:
+    | "shipment_created"
+    | "status_change"
+    | "note"
+    | "couple_po"
+    | "decouple_po"
+    | "shipment_updated";
+  title: string;
+  detail: string | null;
+  field_changes?: Array<{
+    field: string;
+    label: string;
+    before: string | null;
+    after: string | null;
+  }>;
+  actor: string;
+  occurred_at: string;
 }
 
 export interface StatusSummaryData {

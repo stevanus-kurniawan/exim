@@ -9,6 +9,7 @@ import {
 } from "@/services/dashboard-service";
 import { listShipments } from "@/services/shipments-service";
 import { Card, StatsCard } from "@/components/cards";
+import { LoadingSkeleton } from "@/components/feedback";
 import { PageHeader, EmptyState } from "@/components/navigation";
 import { Badge } from "@/components/badges";
 import { IconBox, IconClock, IconShip, IconDocument, IconCheck } from "@/components/icons/KpiIcons";
@@ -58,7 +59,7 @@ export function DashboardContent() {
       .finally(() => setLoading(false));
   }, [accessToken]);
 
-  if (authLoading || loading) return <p className={styles.loading}>Loading…</p>;
+  if (authLoading || loading) return <LoadingSkeleton lines={5} className={styles.loading} />;
   if (error) return <p className={styles.error}>{error}</p>;
 
   return (
@@ -76,10 +77,10 @@ export function DashboardContent() {
           icon={<IconBox />}
         />
         <StatsCard
-          label="Awaiting assignment"
+          label="Claimed (awaiting allocation)"
           value={poCounts.awaitingAssignment}
-          href="/dashboard/po?intake_status=NOTIFIED"
-          aria-label="Awaiting assignment"
+          href="/dashboard/po?intake_status=CLAIMED"
+          aria-label="Claimed awaiting allocation"
           icon={<IconClock />}
         />
         <StatsCard

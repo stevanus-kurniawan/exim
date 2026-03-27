@@ -1,5 +1,5 @@
 /**
- * Auth service — login, logout, refresh, getMe, register, verifyEmail, forgotPassword, resetPassword.
+ * Auth service — login, logout, refresh, getMe, verifyEmail, forgotPassword, resetPassword.
  * Uses API client; no token storage (handled by auth state).
  */
 
@@ -14,15 +14,6 @@ export async function login(
   password: string
 ): Promise<ApiResponse<LoginResponseData>> {
   return apiPost<LoginResponseData>(`${AUTH_PREFIX}/login`, { email, password });
-}
-
-export async function register(payload: {
-  name: string;
-  email: string;
-  password: string;
-  password_confirmation: string;
-}): Promise<ApiResponse<{ user_id: string }>> {
-  return apiPost<{ user_id: string }>(`${AUTH_PREFIX}/register`, payload);
 }
 
 export async function verifyEmail(token: string): Promise<ApiResponse<unknown>> {

@@ -47,6 +47,25 @@ export async function create(req: Request, res: Response, next: NextFunction): P
   }
 }
 
+/** GET /po/lookup-by-po-number?po_number= — resolve intake UUID for coupling by PO number. */
+export async function lookupByPoNumber(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const raw = typeof req.query.po_number === "string" ? req.query.po_number.trim() : "";
+  if (!raw) {
+    sendError(res, "po_number query parameter is required", { statusCode: 400 });
+    return;
+  }
+  try {
+    const id = await repo.findIdByPoNumberTrimmed(raw);
+    if (!id) {
+      sendError(res, "No purchase order found with this PO number", { statusCode: 404 });
+      return;
+    }
+    sendSuccess(res, { id });
+  } catch (e) {
+    next(e);
+  }
+}
+
 export async function list(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const query = parseListQuery(req);
@@ -82,7 +101,7 @@ export async function takeOwnership(req: Request, res: Response, next: NextFunct
       sendError(res, "PO intake not found", { statusCode: 404 });
       return;
     }
-    sendSuccess(res, data, { message: "Ownership taken successfully" });
+    sendSuccess(res, data, { message: "PO claimed successfully" });
   } catch (e) {
     next(e);
   }
@@ -96,10 +115,6 @@ export async function createShipment(req: Request, res: Response, next: NextFunc
     const intake = await service.getById(intakeId);
     if (!intake) {
       sendError(res, "PO intake not found", { statusCode: 404 });
-      return;
-    }
-    if (intake.intake_status === "GROUPED_TO_SHIPMENT") {
-      sendError(res, "PO intake is already grouped to a shipment", { statusCode: 409 });
       return;
     }
     // Pre-fill shipment from PO: vendor/supplier, delivery location, incoterm, kawasan berikat
@@ -134,10 +149,6 @@ export async function coupleToShipment(req: Request, res: Response, next: NextFu
     const intake = await service.getById(intakeId);
     if (!intake) {
       sendError(res, "PO intake not found", { statusCode: 404 });
-      return;
-    }
-    if (intake.intake_status === "GROUPED_TO_SHIPMENT") {
-      sendError(res, "PO intake is already grouped to a shipment", { statusCode: 409 });
       return;
     }
     const shipment = await shipmentService.couplePo(validation.data.shipment_id, [intakeId], userName);

@@ -70,7 +70,7 @@ npm run start
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `JWT_ACCESS_SECRET` | When auth used | Secret for access tokens |
 | `JWT_REFRESH_SECRET` | When auth used | Secret for refresh tokens |
-| `JWT_ACCESS_EXPIRES_IN` | No | e.g. 15m |
+| `JWT_ACCESS_EXPIRES_IN` | No | e.g. 1h |
 | `JWT_REFRESH_EXPIRES_IN` | No | e.g. 7d |
 | `STORAGE_TYPE` | No | local \| shared-folder \| s3 |
 | `STORAGE_LOCAL_PATH` | No | Path for local storage (default: ./uploads) |

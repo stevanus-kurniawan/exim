@@ -1,12 +1,6 @@
-import { Suspense } from "react";
-import { RegisterForm } from "./RegisterForm";
+import { redirect } from "next/navigation";
 
+/** Self-registration is disabled; admins provision accounts from User management. */
 export default function RegisterPage() {
-  return (
-    <main aria-label="Register for EOS">
-      <Suspense fallback={<p className="utilLoadingFallback">Loading…</p>}>
-        <RegisterForm />
-      </Suspense>
-    </main>
-  );
+  redirect("/login");
 }

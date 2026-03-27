@@ -7,31 +7,59 @@ import { useAuth } from "@/hooks/use-auth";
 import { createTestPo } from "@/services/po-service";
 import { Card } from "@/components/cards";
 import { PageHeader } from "@/components/navigation";
-import { Button } from "@/components/forms";
-import { formatDecimal, roundTo2Decimals } from "@/lib/format-number";
+import { Button, ComboboxSelect } from "@/components/forms";
+import { useToast } from "@/components/providers/ToastProvider";
+import { formatDecimal, formatPriceInputWithCommas, roundTo2Decimals } from "@/lib/format-number";
+import { INCOTERM_OPTIONS } from "@/lib/incoterms";
+import { PT_OPTION_LABELS, PO_ITEM_UNIT_OPTIONS, getPlantConfigForPt } from "@/lib/po-create-constants";
 import { isApiError } from "@/types/api";
-import type { CreateTestPoPayload, CreateTestPoItem } from "@/types/po";
+import type { CreateTestPoPayload } from "@/types/po";
 import styles from "./CreatePo.module.css";
 
-const UNIT_OPTIONS = ["PCS", "SET", "UNIT", "BOX", "PKG", "KG", "L", "M", "M2", "PAIR", "DOZ", "CTN", "OTH"];
-const INCOTERM_OPTIONS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DPU", "DAP", "DDP"];
+type CreatePoFormState = Omit<CreateTestPoPayload, "external_id" | "items"> & {
+  pt: string;
+  currency?: string;
+  items: ItemFormLine[];
+};
+
+/** One line item in the form; qty/price as strings so decimals can be typed (e.g. 1.25). */
+type ItemFormLine = {
+  item_description: string;
+  qtyText: string;
+  unit: string;
+  priceText: string;
+};
+
 const CURRENCY_OPTIONS = ["USD", "IDR", "EUR", "GBP", "SGD", "JPY", "CNY", "AUD", "MYR", "THB"];
 
-const initialItem = (): CreateTestPoItem => ({
+const UNIT_OPTIONS: string[] = [...PO_ITEM_UNIT_OPTIONS];
+const UNIT_OPTION_SET = new Set<string>(UNIT_OPTIONS);
+
+/** Allow partial decimal input while typing (qty only — no thousands separator). */
+const DECIMAL_INPUT_PATTERN = /^\d*\.?\d*$/;
+
+const initialItem = (): ItemFormLine => ({
   item_description: "",
-  qty: undefined,
+  qtyText: "",
   unit: "PCS",
-  value: undefined,
-  kurs: undefined,
+  priceText: "",
 });
+
+function parseOptionalDecimal(text: string): number | undefined {
+  const t = text.replace(/,/g, "").trim();
+  if (t === "" || t === ".") return undefined;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined;
+}
 
 export function CreatePo() {
   const router = useRouter();
   const { accessToken } = useAuth();
+  const { pushToast } = useToast();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState<CreateTestPoPayload & { currency?: string }>({
-    external_id: `test-${Date.now()}`,
+  const [form, setForm] = useState<CreatePoFormState>({
+    pt: "",
     po_number: "",
     plant: "",
     supplier_name: "",
@@ -42,11 +70,22 @@ export function CreatePo() {
     items: [initialItem()],
   });
 
-  function updateField<K extends keyof CreateTestPoPayload>(field: K, value: string | undefined) {
+  function updateField<K extends keyof CreatePoFormState>(field: K, value: string | undefined) {
     setForm((prev) => ({ ...prev, [field]: value ?? "" }));
   }
 
-  function updateItem(index: number, field: keyof CreateTestPoItem, value: string | number | undefined) {
+  function handlePtChange(pt: string) {
+    const config = getPlantConfigForPt(pt);
+    setForm((prev) => {
+      let plant = "";
+      if (config?.mode === "fixed") plant = config.plant;
+      return { ...prev, pt, plant };
+    });
+  }
+
+  const plantConfig = form.pt ? getPlantConfigForPt(form.pt) : null;
+
+  function updateItem<K extends keyof ItemFormLine>(index: number, field: K, value: ItemFormLine[K]) {
     setForm((prev) => {
       const items = [...(prev.items ?? [])];
       if (!items[index]) items[index] = initialItem();
@@ -71,10 +110,12 @@ export function CreatePo() {
     });
   }
 
-  function getItemTotal(qty: number | undefined, value: number | undefined): number | null {
-    if (qty == null || value == null) return null;
-    const n = Number(qty) * Number(value);
-    return Number.isNaN(n) ? null : n;
+  function getItemLineTotal(item: ItemFormLine): number | null {
+    const qty = parseOptionalDecimal(item.qtyText);
+    const price = parseOptionalDecimal(item.priceText);
+    if (qty == null || price == null) return null;
+    const n = qty * price;
+    return Number.isFinite(n) ? n : null;
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -82,38 +123,75 @@ export function CreatePo() {
     setSubmitError(null);
     if (!accessToken) return;
 
+    if (!form.pt.trim()) {
+      setSubmitError("Please select PT.");
+      return;
+    }
+    if (plantConfig?.mode === "select" && !form.plant?.trim()) {
+      setSubmitError("Please select Plant.");
+      return;
+    }
+    if (!form.delivery_location?.trim()) {
+      setSubmitError("Delivery location is required.");
+      return;
+    }
+    if (form.kawasan_berikat !== "Yes" && form.kawasan_berikat !== "No") {
+      setSubmitError("Please select Kawasan berikat (Yes or No).");
+      return;
+    }
+
+    const validItems = (form.items ?? []).filter(
+      (it) =>
+        it.item_description?.trim() ||
+        it.qtyText.trim() !== "" ||
+        it.unit?.trim() ||
+        it.priceText.trim() !== ""
+    );
+    if (validItems.length === 0) {
+      setSubmitError("Add at least one line item (e.g. description, quantity, or value).");
+      return;
+    }
+
+    for (const it of validItems) {
+      const u = it.unit?.trim() ?? "";
+      if (u && !UNIT_OPTION_SET.has(u)) {
+        setSubmitError("Each line unit must be selected from the unit list.");
+        return;
+      }
+    }
+
     const payload: CreateTestPoPayload = {
-      external_id: form.external_id.trim(),
+      external_id: `test-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       po_number: form.po_number.trim(),
       supplier_name: form.supplier_name.trim(),
+      delivery_location: form.delivery_location.trim(),
+      kawasan_berikat: form.kawasan_berikat,
+      pt: form.pt.trim(),
     };
     if (form.plant?.trim()) payload.plant = form.plant.trim();
-    if (form.delivery_location?.trim()) payload.delivery_location = form.delivery_location.trim();
     if (form.incoterm_location?.trim()) payload.incoterm_location = form.incoterm_location.trim();
-    if (form.kawasan_berikat?.trim()) payload.kawasan_berikat = form.kawasan_berikat.trim();
     if (form.currency?.trim()) payload.currency = form.currency.trim();
 
-    const validItems = form.items?.filter(
-      (it) =>
-        it.item_description?.trim() || it.qty != null || it.unit?.trim() || it.value != null || it.kurs != null
-    );
-    if (validItems && validItems.length > 0) {
-      payload.items = validItems.map((it) => ({
+    payload.items = validItems.map((it) => {
+      const qty = parseOptionalDecimal(it.qtyText);
+      const value = parseOptionalDecimal(it.priceText);
+      return {
         item_description: it.item_description?.trim() || undefined,
-        qty: it.qty,
+        qty: qty != null ? roundTo2Decimals(qty) : undefined,
         unit: it.unit?.trim() || undefined,
-        value: it.value,
-        kurs: it.kurs,
-      }));
-    }
+        value: value != null ? roundTo2Decimals(value) : undefined,
+      };
+    });
 
     setSubmitting(true);
     createTestPo(payload, accessToken)
       .then((res) => {
         if (isApiError(res)) {
           setSubmitError(res.message);
+          pushToast(res.message, "error");
           return;
         }
+        pushToast("Purchase Order created.", "success");
         const data = res.data as { id?: string };
         if (data?.id) router.push(`/dashboard/po/${data.id}`);
         else router.push("/dashboard/po");
@@ -125,12 +203,7 @@ export function CreatePo() {
 
   return (
     <section className={styles.section}>
-      <PageHeader
-        title="Create Purchase Order"
-        subtitle="Temporary feature for E2E testing while SaaS integration is not yet available."
-        backHref="/dashboard/po"
-        backLabel="Purchase Order"
-      />
+      <PageHeader title="Create Purchase Order" backHref="/dashboard/po" backLabel="Purchase Order" />
 
       <form onSubmit={handleSubmit}>
         {submitError && <p className={styles.formError}>{submitError}</p>}
@@ -139,16 +212,64 @@ export function CreatePo() {
           <h2 className={styles.sectionTitle}>General</h2>
           <div className={styles.grid}>
             <div className={styles.field}>
-              <label className={styles.fieldLabel} htmlFor="external_id">External ID *</label>
-              <input
-                id="external_id"
-                type="text"
-                className={styles.formInput}
-                value={form.external_id}
-                onChange={(e) => updateField("external_id", e.target.value)}
+              <label className={styles.fieldLabel} htmlFor="pt">PT *</label>
+              <select
+                id="pt"
+                className={styles.formSelect}
+                value={form.pt}
+                onChange={(e) => handlePtChange(e.target.value)}
                 required
-                placeholder="e.g. test-123"
-              />
+                aria-label="PT"
+              >
+                <option value="">— Select PT —</option>
+                {PT_OPTION_LABELS.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className={styles.field}>
+              <label className={styles.fieldLabel} htmlFor="plant">Plant *</label>
+              {!form.pt && (
+                <input
+                  id="plant"
+                  type="text"
+                  className={styles.formInput}
+                  value=""
+                  readOnly
+                  disabled
+                  placeholder="Select PT first"
+                  aria-label="Plant"
+                />
+              )}
+              {form.pt && plantConfig?.mode === "fixed" && (
+                <input
+                  id="plant"
+                  type="text"
+                  className={styles.formInput}
+                  value={plantConfig.plant}
+                  readOnly
+                  aria-label="Plant"
+                />
+              )}
+              {form.pt && plantConfig?.mode === "select" && (
+                <select
+                  id="plant"
+                  className={styles.formSelect}
+                  value={form.plant ?? ""}
+                  onChange={(e) => updateField("plant", e.target.value)}
+                  required
+                  aria-label="Plant"
+                >
+                  <option value="">— Select plant —</option>
+                  {plantConfig.plants.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className={styles.field}>
               <label className={styles.fieldLabel} htmlFor="po_number">PO number *</label>
@@ -160,17 +281,6 @@ export function CreatePo() {
                 onChange={(e) => updateField("po_number", e.target.value)}
                 required
                 placeholder="e.g. PO-2024-001"
-              />
-            </div>
-            <div className={styles.field}>
-              <label className={styles.fieldLabel} htmlFor="plant">Plant</label>
-              <input
-                id="plant"
-                type="text"
-                className={styles.formInput}
-                value={form.plant ?? ""}
-                onChange={(e) => updateField("plant", e.target.value)}
-                placeholder="e.g. PLANT-JKT"
               />
             </div>
             <div className={styles.field}>
@@ -186,14 +296,15 @@ export function CreatePo() {
               />
             </div>
             <div className={styles.field}>
-              <label className={styles.fieldLabel} htmlFor="delivery_location">Delivery location</label>
+              <label className={styles.fieldLabel} htmlFor="delivery_location">Delivery location *</label>
               <input
                 id="delivery_location"
                 type="text"
                 className={styles.formInput}
                 value={form.delivery_location ?? ""}
                 onChange={(e) => updateField("delivery_location", e.target.value)}
-                placeholder="Optional"
+                required
+                placeholder="Delivery location"
               />
             </div>
             <div className={styles.field}>
@@ -230,15 +341,19 @@ export function CreatePo() {
               </select>
             </div>
             <div className={styles.field}>
-              <label className={styles.fieldLabel} htmlFor="kawasan_berikat">Kawasan berikat</label>
-              <input
+              <label className={styles.fieldLabel} htmlFor="kawasan_berikat">Kawasan berikat *</label>
+              <select
                 id="kawasan_berikat"
-                type="text"
-                className={styles.formInput}
+                className={styles.formSelect}
                 value={form.kawasan_berikat ?? ""}
                 onChange={(e) => updateField("kawasan_berikat", e.target.value)}
-                placeholder="Optional"
-              />
+                required
+                aria-label="Kawasan berikat"
+              >
+                <option value="">— Select —</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
             </div>
           </div>
         </Card>
@@ -248,24 +363,26 @@ export function CreatePo() {
             Items
             <span className={styles.currencyBadge}>Currency: {poCurrency}</span>
           </h2>
-          <p className={styles.itemsHint}>
-            Add one or more items. Total value = Qty × Value (read-only). Use the currency above for this PO.
-          </p>
+
           <div className={styles.itemsTableWrap}>
             <table className={styles.itemsTable}>
               <thead>
                 <tr>
                   <th className={styles.itemsTh}>Description</th>
-                  <th className={`${styles.itemsTh} ${styles.itemsThCenter}`}>Qty</th>
-                  <th className={`${styles.itemsTh} ${styles.itemsThCenter}`}>Unit</th>
-                  <th className={`${styles.itemsTh} ${styles.itemsThCenter}`}>Value</th>
-                  <th className={`${styles.itemsTh} ${styles.itemsThCenter}`}>Total value</th>
+                  <th className={`${styles.itemsTh} ${styles.thMetricsGroup}`} colSpan={3}>
+                    <div className={styles.metricsHeaderInner}>
+                      <span>Qty</span>
+                      <span>Unit</span>
+                      <span>Price per unit</span>
+                    </div>
+                  </th>
+                  <th className={`${styles.itemsTh} ${styles.itemsThCenter}`}>Total amount</th>
                   <th className={styles.itemsThRemove} aria-label="Remove row" />
                 </tr>
               </thead>
               <tbody>
                 {(form.items ?? []).map((item, index) => {
-                  const total = getItemTotal(item.qty, item.value);
+                  const total = getItemLineTotal(item);
                   return (
                     <tr key={index}>
                       <td className={styles.itemsTd}>
@@ -278,55 +395,46 @@ export function CreatePo() {
                           aria-label="Item description"
                         />
                       </td>
-                      <td className={`${styles.itemsTd} ${styles.itemsTdCenter}`}>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          className={styles.itemsInput}
-                          value={item.qty ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (v === "") updateItem(index, "qty", undefined);
-                            else {
-                              const n = Number(v);
-                              updateItem(index, "qty", Number.isNaN(n) ? undefined : roundTo2Decimals(n));
+                      <td className={`${styles.itemsTd} ${styles.tdMetricsGroup}`} colSpan={3}>
+                        <div className={styles.metricsCluster}>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            className={styles.itemsInput}
+                            value={item.qtyText}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === "" || DECIMAL_INPUT_PATTERN.test(v)) {
+                                updateItem(index, "qtyText", v);
+                              }
+                            }}
+                            placeholder="0"
+                            aria-label="Qty"
+                          />
+                          <ComboboxSelect
+                            className={styles.unitCombobox}
+                            inputClassName={`${styles.itemsInput} ${styles.itemsInputDatalist}`}
+                            options={UNIT_OPTIONS}
+                            value={item.unit ?? ""}
+                            onChange={(v) => updateItem(index, "unit", v || "PCS")}
+                            allowEmpty={false}
+                            placeholder="Type to search…"
+                            aria-label="Unit"
+                          />
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            className={styles.itemsInput}
+                            value={item.priceText}
+                            onChange={(e) =>
+                              updateItem(index, "priceText", formatPriceInputWithCommas(e.target.value))
                             }
-                          }}
-                          placeholder="0"
-                          aria-label="Qty"
-                        />
-                      </td>
-                      <td className={`${styles.itemsTd} ${styles.itemsTdCenter}`}>
-                        <select
-                          className={styles.itemsSelect}
-                          value={item.unit ?? "PCS"}
-                          onChange={(e) => updateItem(index, "unit", e.target.value)}
-                          aria-label="Unit"
-                        >
-                          {UNIT_OPTIONS.map((u) => (
-                            <option key={u} value={u}>
-                              {u}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className={`${styles.itemsTd} ${styles.itemsTdCenter}`}>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          className={styles.itemsInput}
-                          value={item.value ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (v === "") updateItem(index, "value", undefined);
-                            else {
-                              const n = Number(v);
-                              updateItem(index, "value", Number.isNaN(n) ? undefined : roundTo2Decimals(n));
-                            }
-                          }}
-                          placeholder="0"
-                          aria-label="Value"
-                        />
+                            placeholder="1,234.56"
+                            aria-label="Price per unit"
+                          />
+                        </div>
                       </td>
                       <td className={`${styles.itemsTd} ${styles.itemsTdTotal}`}>
                         {total != null ? formatDecimal(total) : "—"}

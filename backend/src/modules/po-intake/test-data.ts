@@ -15,8 +15,8 @@ export const sampleCreatePoIntake: CreatePoIntakeDto = {
   delivery_location: "Jakarta Warehouse",
   incoterm_location: "FOB",
   items: [
-    { item_description: "Industrial Pump A", qty: 2, unit: "PCS", value: 12500, kurs: 15500 },
-    { item_description: "Valve Set B", qty: 10, unit: "SET", value: 3500, kurs: 15500 },
+    { item_description: "Industrial Pump A", qty: 2, unit: "PCS", value: 12500 },
+    { item_description: "Valve Set B", qty: 10, unit: "SET", value: 3500 },
   ],
 };
 

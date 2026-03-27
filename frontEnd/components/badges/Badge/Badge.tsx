@@ -3,7 +3,7 @@
 import type { HTMLAttributes } from "react";
 import styles from "./Badge.module.css";
 
-export type BadgeVariant = "default" | "success" | "warning" | "neutral";
+export type BadgeVariant = "default" | "success" | "warning" | "neutral" | "info" | "accent" | "muted";
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;

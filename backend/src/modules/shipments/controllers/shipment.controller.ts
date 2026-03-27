@@ -19,6 +19,14 @@ import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping
 import { ShipmentPoLineReceivedRepository } from "../repositories/shipment-po-line-received.repository.js";
 import type { ListShipmentsQuery } from "../dto/index.js";
 
+function actorFromRequest(req: Request): string {
+  const name = req.user?.name?.trim();
+  if (name) return name;
+  const email = req.user?.email?.trim();
+  if (email) return email;
+  return "Unknown user";
+}
+
 const shipmentRepo = new ShipmentRepository();
 const mappingRepo = new ShipmentPoMappingRepository();
 const lineReceivedRepo = new ShipmentPoLineReceivedRepository();
@@ -37,6 +45,8 @@ function parseListQuery(req: Request): ListShipmentsQuery {
     po_number: typeof q.po_number === "string" ? q.po_number : undefined,
     from_date: typeof q.from_date === "string" ? q.from_date : undefined,
     to_date: typeof q.to_date === "string" ? q.to_date : undefined,
+    po_from_date: typeof q.po_from_date === "string" ? q.po_from_date : undefined,
+    po_to_date: typeof q.po_to_date === "string" ? q.po_to_date : undefined,
   };
 }
 
@@ -88,12 +98,12 @@ export async function update(req: Request, res: Response, next: NextFunction): P
     return;
   }
   try {
-    const data = await service.update(id, validation.data);
+    const data = await service.update(id, validation.data, actorFromRequest(req));
     if (!data) {
       sendError(res, "Shipment not found", { statusCode: 404 });
       return;
     }
-    sendSuccess(res, { id: data.id }, { message: "Shipment updated successfully" });
+    sendSuccess(res, data, { message: "Shipment updated successfully" });
   } catch (e) {
     next(e);
   }
@@ -185,7 +195,8 @@ export async function updatePoLines(req: Request, res: Response, next: NextFunct
     return;
   }
   try {
-    const data = await service.updatePoLines(shipmentId, intakeId, validation.data.lines);
+    const { lines } = validation.data;
+    const data = await service.updatePoLines(shipmentId, intakeId, lines);
     if (!data) {
       sendError(res, "Shipment not found", { statusCode: 404 });
       return;

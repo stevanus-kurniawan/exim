@@ -20,7 +20,7 @@ export function getRefreshToken(): string | null {
 
 export function setTokens(access: string, refresh: string, expiresInSeconds?: number): void {
   if (typeof document === "undefined") return;
-  const maxAge = expiresInSeconds ?? 60 * 15; // 15m default
+  const maxAge = expiresInSeconds ?? 60 * 60; // 1h fallback if server omits expires_in
   document.cookie = `${ACCESS_KEY}=${encodeURIComponent(access)}; path=/; max-age=${maxAge}; SameSite=Lax`;
   document.cookie = `${REFRESH_KEY}=${encodeURIComponent(refresh)}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`; // 7d
 }

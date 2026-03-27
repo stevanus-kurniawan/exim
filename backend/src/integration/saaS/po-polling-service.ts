@@ -20,7 +20,7 @@ function toCreateDto(po: SaasPoResponse): {
   delivery_location?: string;
   incoterm_location?: string;
   kawasan_berikat?: string;
-  items?: { item_description?: string; qty?: number; unit?: string; value?: number; kurs?: number }[];
+  items?: { item_description?: string; qty?: number; unit?: string; value?: number }[];
 } {
   return {
     external_id: po.external_id,
@@ -35,7 +35,6 @@ function toCreateDto(po: SaasPoResponse): {
       qty: it.qty,
       unit: it.unit,
       value: it.value,
-      kurs: it.kurs,
     })),
   };
 }
@@ -59,7 +58,6 @@ export async function runPoPollingCycle(
         const dto = toCreateDto(po);
         const row = await repo.create(dto, "NEW_PO_DETECTED");
         await repo.insertItems(row.id, dto.items);
-        await repo.updateStatusToNotified(row.id);
         ingested += 1;
       } catch (err) {
         const msg = String(err);

@@ -4,7 +4,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import { sendSuccess, sendError } from "../../../shared/response.js";
-import { validateLoginBody, validateRefreshBody, validateRegisterBody, validateVerifyEmail, validateForgotPasswordBody, validateResetPasswordBody } from "../validators/index.js";
+import { validateLoginBody, validateRefreshBody, validateVerifyEmail, validateForgotPasswordBody, validateResetPasswordBody } from "../validators/index.js";
 import { AuthService } from "../services/auth.service.js";
 import { UserRepository } from "../repositories/user.repository.js";
 import { RefreshTokenRepository } from "../repositories/refresh-token.repository.js";
@@ -72,20 +72,6 @@ export async function getMe(req: Request, res: Response, next: NextFunction): Pr
       return;
     }
     sendSuccess(res, me, { statusCode: 200 });
-  } catch (e) {
-    next(e);
-  }
-}
-
-export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const validation = validateRegisterBody(req);
-  if (!validation.ok) {
-    sendError(res, "Validation error", { errors: validation.errors, statusCode: 400 });
-    return;
-  }
-  try {
-    const data = await authService.register(validation.data.name, validation.data.email, validation.data.password);
-    sendSuccess(res, data, { message: "Registration successful. Please check your email to verify your account.", statusCode: 201 });
   } catch (e) {
     next(e);
   }

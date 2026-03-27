@@ -62,3 +62,12 @@ export async function createTestPo(
   return apiPost("po/test-create", payload, accessToken);
 }
 
+/** GET /po/lookup-by-po-number — resolve intake id from PO number (for grouping on a shipment). */
+export async function lookupPoByPoNumber(
+  poNumber: string,
+  accessToken: string | null
+): Promise<ApiResponse<{ id: string }>> {
+  const q = new URLSearchParams({ po_number: poNumber.trim() });
+  return apiGet<{ id: string }>(`po/lookup-by-po-number?${q.toString()}`, accessToken);
+}
+

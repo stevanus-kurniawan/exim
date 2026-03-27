@@ -9,6 +9,8 @@ declare global {
         name: string;
         email: string;
         role: string;
+        permission_overrides: string[];
+        effective_permissions: string[];
       };
     }
   }

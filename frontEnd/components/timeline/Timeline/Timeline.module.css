@@ -30,8 +30,9 @@
   box-sizing: border-box;
 }
 
+/* Completed steps: green dot (distinct from future / pending). */
 .markerComplete {
-  background-color: var(--color-primitive-border-dark, #9e9e9e);
+  background-color: #16a34a;
 }
 
 .markerActive {
@@ -40,6 +41,10 @@
 
 .markerPending {
   background-color: var(--color-primitive-border-light, #e0e0e0);
+}
+
+.markerNext {
+  background-color: #bdbdbd;
 }
 
 /* Connector: 2px solid line; color from current item's state. */
@@ -53,12 +58,17 @@
   background-color: var(--color-primitive-border-light, #e0e0e0);
 }
 
+/* Connector through completed steps: green trail to current. */
 .item[data-variant="complete"]::before {
-  background-color: var(--color-primitive-border-dark, #9e9e9e);
+  background-color: #86efac;
 }
 
 .item[data-variant="active"]::before {
   background-color: var(--color-semantic-primary-default, #c43a31);
+}
+
+.item[data-variant="next"]::before {
+  background-color: var(--color-primitive-border-light, #e0e0e0);
 }
 
 .item:last-child::before {
@@ -78,6 +88,23 @@
   color: var(--color-primitive-text-charcoal, #2b2b2b);
 }
 
+/* Timeline status colors by progression state (done/current/next/pending). */
+.statusComplete {
+  color: #15803d;
+}
+
+.statusActive {
+  color: var(--color-semantic-primary-default, #c43a31);
+}
+
+.statusNext {
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.statusPending {
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
 .meta {
   font-size: var(--typography-fontSize-small, 14px);
   color: var(--color-primitive-text-steel, #6b6b6b);
@@ -90,9 +117,22 @@
   line-height: var(--typography-lineHeight-default, 1.5);
 }
 
+/* Future steps: muted label + meta (not yet reached). */
 .item[data-variant="pending"] .status,
 .item[data-variant="pending"] .meta {
   color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.item[data-variant="pending"] .status {
+  font-weight: var(--typography-fontWeight-medium, 500);
+  opacity: 0.88;
+}
+
+/* Past steps with a recorded transition: meta slightly stronger than future. */
+.item[data-variant="complete"] .meta,
+.item[data-variant="active"] .meta,
+.item[data-variant="next"] .meta {
+  color: #525252;
 }
 
 .empty {

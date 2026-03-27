@@ -1,20 +1,17 @@
-/**
- * Dashboard repository: read-only aggregate queries. Efficient, easy to extend.
- */
-
 import type { Pool } from "pg";
 import { getPool } from "../../../db/index.js";
 
-export interface ImportSummaryRow {
-  total_transactions: string;
-  in_progress: string;
-  delivered: string;
-  delayed: string;
+export interface ProductSpecificationSummaryQuery {
+  month?: number;
+  year?: number;
 }
 
-export interface StatusCountRow {
-  status: string;
-  count: string;
+export interface ProductSpecificationSummaryRow {
+  product_specification: string;
+  vendor_name: string | null;
+  pt: string | null;
+  plant: string | null;
+  delivered_qty: number;
 }
 
 export class DashboardRepository {
@@ -22,33 +19,69 @@ export class DashboardRepository {
     return getPool();
   }
 
-  /** Single query for summary counts. Extend with more metrics as needed. */
-  async getImportSummary(): Promise<ImportSummaryRow> {
-    const result = await this.pool.query<ImportSummaryRow>(`
-      SELECT
-        COUNT(*)::text AS total_transactions,
-        COUNT(*) FILTER (WHERE closed_at IS NULL AND current_status != 'DELIVERED')::text AS in_progress,
-        COUNT(*) FILTER (WHERE current_status = 'DELIVERED')::text AS delivered,
-        COUNT(*) FILTER (WHERE closed_at IS NULL AND current_status != 'DELIVERED' AND eta IS NOT NULL AND eta < NOW())::text AS delayed
-      FROM import_transactions
-    `);
-    return result.rows[0] ?? {
-      total_transactions: "0",
-      in_progress: "0",
-      delivered: "0",
-      delayed: "0",
-    };
-  }
+  async getProductSpecificationSummary(
+    query: ProductSpecificationSummaryQuery
+  ): Promise<ProductSpecificationSummaryRow[]> {
+    const conditions: string[] = [
+      "m.decoupled_at IS NULL",
+      "s.current_status = 'DELIVERED'",
+      "s.product_classification IS NOT NULL",
+      "TRIM(s.product_classification) <> ''",
+    ];
+    const params: unknown[] = [];
+    let idx = 1;
 
-  /** Count by current_status. Index on current_status keeps this efficient. */
-  async getImportStatusSummary(): Promise<StatusCountRow[]> {
-    const result = await this.pool.query<StatusCountRow>(`
-      SELECT current_status AS status, COUNT(*)::text AS count
-      FROM import_transactions
-      WHERE closed_at IS NULL
-      GROUP BY current_status
-      ORDER BY current_status
-    `);
-    return result.rows;
+    if (query.month != null) {
+      conditions.push(`EXTRACT(MONTH FROM COALESCE(s.closed_at, s.ata, s.updated_at)) = $${idx++}`);
+      params.push(query.month);
+    }
+    if (query.year != null) {
+      conditions.push(`EXTRACT(YEAR FROM COALESCE(s.closed_at, s.ata, s.updated_at)) = $${idx++}`);
+      params.push(query.year);
+    }
+
+    const where = conditions.join(" AND ");
+    const result = await this.pool.query<{
+      product_specification: string;
+      vendor_name: string | null;
+      pt: string | null;
+      plant: string | null;
+      delivered_qty: string;
+    }>(
+      `SELECT
+         TRIM(s.product_classification) AS product_specification,
+         NULLIF(TRIM(s.vendor_name), '') AS vendor_name,
+         NULLIF(TRIM(i.pt), '') AS pt,
+         NULLIF(TRIM(i.plant), '') AS plant,
+         COALESCE(SUM(COALESCE(r.received_qty, 0)), 0)::text AS delivered_qty
+       FROM shipment_po_line_received r
+       JOIN shipments s
+         ON s.id = r.shipment_id
+       JOIN shipment_po_mapping m
+         ON m.shipment_id = r.shipment_id
+         AND m.intake_id = r.intake_id
+       LEFT JOIN Import_purchase_order i
+         ON i.id = r.intake_id
+       WHERE ${where}
+       GROUP BY
+         TRIM(s.product_classification),
+         NULLIF(TRIM(s.vendor_name), ''),
+         NULLIF(TRIM(i.pt), ''),
+         NULLIF(TRIM(i.plant), '')
+       ORDER BY
+         TRIM(s.product_classification) ASC,
+         NULLIF(TRIM(s.vendor_name), '') ASC NULLS LAST,
+         NULLIF(TRIM(i.pt), '') ASC NULLS LAST,
+         NULLIF(TRIM(i.plant), '') ASC NULLS LAST`,
+      params
+    );
+
+    return result.rows.map((row) => ({
+      product_specification: row.product_specification,
+      vendor_name: row.vendor_name,
+      pt: row.pt,
+      plant: row.plant,
+      delivered_qty: parseFloat(row.delivered_qty),
+    }));
   }
 }

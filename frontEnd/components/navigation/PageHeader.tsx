@@ -9,6 +9,8 @@ export interface PageHeaderProps {
   backLabel?: string;
   actions?: React.ReactNode;
   subtitle?: string;
+  breadcrumbs?: Array<{ label: string; href?: string }>;
+  sticky?: boolean;
 }
 
 export function PageHeader({
@@ -17,11 +19,29 @@ export function PageHeader({
   backLabel = "Back",
   actions,
   subtitle,
+  breadcrumbs,
+  sticky = false,
 }: PageHeaderProps) {
   const showTopRow = backHref || actions;
 
   return (
-    <header className={styles.header}>
+    <header className={`${styles.header} ${sticky ? styles.sticky : ""}`.trim()}>
+      {breadcrumbs && breadcrumbs.length > 0 && (
+        <nav className={styles.breadcrumbs} aria-label="Breadcrumb">
+          {breadcrumbs.map((item, idx) => (
+            <span key={`${item.label}-${idx}`} className={styles.crumb}>
+              {item.href ? (
+                <Link href={item.href} className={styles.crumbLink}>
+                  {item.label}
+                </Link>
+              ) : (
+                <span className={styles.crumbCurrent}>{item.label}</span>
+              )}
+              {idx < breadcrumbs.length - 1 && <span className={styles.crumbSep}>/</span>}
+            </span>
+          ))}
+        </nav>
+      )}
       {showTopRow && (
         <div className={styles.topRow}>
           {backHref ? (

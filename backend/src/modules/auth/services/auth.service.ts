@@ -1,7 +1,7 @@
 /**
  * Auth service: business logic only. No HTTP, no raw SQL.
  * Passwords hashed with bcrypt; never store plain text.
- * Registration: email domain check, verification email. Login: requires verified email.
+ * Login: requires verified email. Accounts are provisioned by admins.
  */
 
 import bcrypt from "bcrypt";
@@ -12,15 +12,16 @@ import { UserRepository } from "../repositories/user.repository.js";
 import { RefreshTokenRepository } from "../repositories/refresh-token.repository.js";
 import { EmailVerificationTokenRepository } from "../repositories/email-verification-token.repository.js";
 import { PasswordResetTokenRepository } from "../repositories/password-reset-token.repository.js";
-import { sendVerificationEmail, sendPasswordResetEmail } from "./email.service.js";
+import { sendPasswordResetEmail } from "./email.service.js";
 import { AppError } from "../../../middlewares/errorHandler.js";
+import { computeEffectivePermissions, normalizePermissionOverrides } from "../../../shared/rbac.js";
 import type { AuthUser, LoginResponseData, RefreshResponseData } from "../dto/index.js";
+import type { UserRow } from "../dto/index.js";
 
 const SALT_ROUNDS = 12;
-const VERIFICATION_TOKEN_EXPIRY_HOURS = 24;
 const RESET_TOKEN_EXPIRY_HOURS = 1;
 
-/** Parse expires_in (e.g. "15m", "7d") to seconds for response. */
+/** Parse expires_in (e.g. "1h", "7d") to seconds for response. */
 function expiresInSeconds(exp: string): number {
   const match = exp.match(/^(\d+)(s|m|h|d)$/);
   if (!match) return 3600;
@@ -33,8 +34,17 @@ function expiresInSeconds(exp: string): number {
   return 3600;
 }
 
-function toAuthUser(row: { id: string; name: string; email: string; role: string }): AuthUser {
-  return { id: row.id, name: row.name, email: row.email, role: row.role };
+function rowToAuthUser(row: UserRow): AuthUser {
+  const permission_overrides = normalizePermissionOverrides(row.permission_overrides);
+  const effective_permissions = [...computeEffectivePermissions(row.role, permission_overrides)];
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    permission_overrides,
+    effective_permissions,
+  };
 }
 
 export class AuthService {
@@ -66,9 +76,9 @@ export class AuthService {
       throw new AppError("Please verify your email before signing in", 403);
     }
 
-    const authUser = toAuthUser(user);
+    const authUser = rowToAuthUser(user);
     const accessToken = this.signAccessToken(authUser);
-    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "15m");
+    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "1h");
 
     const refreshTokenValue = randomBytes(32).toString("hex");
     const refreshExpires = config.jwt.refreshExpiresIn ?? "7d";
@@ -112,9 +122,9 @@ export class AuthService {
       throw new AppError("User not found or inactive", 401);
     }
 
-    const authUser = toAuthUser(user);
+    const authUser = rowToAuthUser(user);
     const accessToken = this.signAccessToken(authUser);
-    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "15m");
+    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "1h");
 
     await this.refreshTokenRepo.revokeByToken(refreshToken);
     const newRefreshValue = randomBytes(32).toString("hex");
@@ -131,6 +141,7 @@ export class AuthService {
       token_type: "Bearer",
       expires_in: expiresIn,
       refresh_token: newRefreshValue,
+      user: authUser,
     };
   }
 
@@ -140,47 +151,12 @@ export class AuthService {
 
   async getMe(userId: string): Promise<AuthUser | null> {
     const user = await this.userRepo.findById(userId);
-    return user ? toAuthUser(user) : null;
+    return user ? rowToAuthUser(user) : null;
   }
 
   /** Hash password for storage (e.g. seed or user create). Never store plain text. */
   async hashPassword(plainPassword: string): Promise<string> {
     return bcrypt.hash(plainPassword, SALT_ROUNDS);
-  }
-
-  /** Check if email is allowed for registration (domain or allowAnyEmail). */
-  private isEmailAllowedForRegistration(email: string): boolean {
-    if (config.auth.allowAnyEmail) return true;
-    const domain = config.auth.allowedEmailDomain.toLowerCase();
-    const emailLower = email.trim().toLowerCase();
-    return emailLower.endsWith(`@${domain}`);
-  }
-
-  async register(name: string, email: string, password: string): Promise<{ user_id: string }> {
-    const emailTrimmed = email.trim().toLowerCase();
-    if (!this.isEmailAllowedForRegistration(emailTrimmed)) {
-      throw new AppError(
-        `Only emails with domain @${config.auth.allowedEmailDomain} can register`,
-        400
-      );
-    }
-    const existing = await this.userRepo.findByEmail(emailTrimmed);
-    if (existing) {
-      throw new AppError("An account with this email already exists", 409);
-    }
-    const passwordHash = await this.hashPassword(password);
-    const user = await this.userRepo.create({
-      email: emailTrimmed,
-      passwordHash,
-      name: name.trim(),
-      role: "VIEWER",
-    });
-    const token = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
-    await this.verificationTokenRepo.deleteByUserId(user.id);
-    await this.verificationTokenRepo.create({ userId: user.id, token, expiresAt });
-    await sendVerificationEmail(user.email, user.name, token);
-    return { user_id: user.id };
   }
 
   async verifyEmail(token: string): Promise<void> {
@@ -226,13 +202,14 @@ export class AuthService {
   private signAccessToken(user: AuthUser): string {
     const secret = config.jwt.accessSecret;
     if (!secret) throw new AppError("Auth is not configured", 500);
-    const expiresIn = config.jwt.accessExpiresIn ?? "15m";
+    const expiresIn = config.jwt.accessExpiresIn ?? "1h";
     return jwt.sign(
       {
         sub: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
+        permission_overrides: user.permission_overrides,
         type: "access",
       },
       secret,

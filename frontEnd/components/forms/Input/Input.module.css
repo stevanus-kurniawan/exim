@@ -36,3 +36,8 @@
   font-size: var(--typography-fontSize-xs, 12px);
   color: var(--color-semantic-destructive-default, #c43a31);
 }
+
+.helper {
+  font-size: var(--typography-fontSize-xs, 12px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}

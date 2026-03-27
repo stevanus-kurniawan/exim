@@ -10,6 +10,24 @@ import type { AuthUser, LoginResponseData } from "@/types/auth";
 import { isApiError } from "@/types/api";
 import { getAccessToken, getRefreshToken, setTokens, clearTokens } from "@/lib/cookies";
 
+function normalizeAuthUser(raw: unknown): AuthUser | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id !== "string") return null;
+  return {
+    id: o.id,
+    name: typeof o.name === "string" ? o.name : "",
+    email: typeof o.email === "string" ? o.email : "",
+    role: typeof o.role === "string" ? o.role : "VIEWER",
+    permission_overrides: Array.isArray(o.permission_overrides)
+      ? o.permission_overrides.filter((x): x is string => typeof x === "string")
+      : [],
+    effective_permissions: Array.isArray(o.effective_permissions)
+      ? o.effective_permissions.filter((x): x is string => typeof x === "string")
+      : [],
+  };
+}
+
 interface AuthState {
   user: AuthUser | null;
   accessToken: string | null;
@@ -46,9 +64,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
     setTokens(res.data.access_token, res.data.refresh_token, res.data.expires_in);
+    let nextUser = normalizeAuthUser(res.data.user);
+    if (!nextUser) {
+      const me = await getMe(res.data.access_token);
+      if (!isApiError(me) && me.data) nextUser = normalizeAuthUser(me.data);
+    }
+    if (!nextUser) {
+      clearTokens();
+      setState((s) => ({ ...s, user: null, accessToken: null, loading: false, initialized: true }));
+      return false;
+    }
     setState((s) => ({
       ...s,
-      user: res.data!.user,
+      user: nextUser,
       accessToken: res.data!.access_token,
       loading: false,
       initialized: true,
@@ -89,10 +117,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return { ok: false, error: res.message, errors: res.errors };
         }
         const data = res.data as LoginResponseData;
+        const nu = normalizeAuthUser(data.user);
+        if (!nu) {
+          setState((s) => ({ ...s, loading: false }));
+          return { ok: false, error: "Invalid user payload from server" };
+        }
         setTokens(data.access_token, data.refresh_token, data.expires_in);
         setState((s) => ({
           ...s,
-          user: data.user,
+          user: nu,
           accessToken: data.access_token,
           loading: false,
           initialized: true,

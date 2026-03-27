@@ -3,7 +3,7 @@ import { PoList } from "./PoList";
 
 export default function PoPage() {
   return (
-    <Suspense fallback={<p>Loading…</p>}>
+    <Suspense fallback={<p className="utilLoadingFallback">Loading…</p>}>
       <PoList />
     </Suspense>
   );

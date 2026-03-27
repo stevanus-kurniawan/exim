@@ -25,10 +25,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div
             className={styles.overlay}
             onClick={closeMenu}
-            onKeyDown={(e) => e.key === "Escape" && closeMenu()}
-            role="button"
-            tabIndex={0}
-            aria-label="Close menu"
+            aria-hidden="true"
           />
         )}
         <MainLayout>{children}</MainLayout>

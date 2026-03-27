@@ -10,6 +10,9 @@ import { uploadSingle } from "../../middlewares/upload.middleware.js";
 import * as shipmentController from "./controllers/shipment.controller.js";
 import * as statusController from "./controllers/shipment-status.controller.js";
 import * as bidController from "./controllers/shipment-bid.controller.js";
+import * as noteController from "./controllers/shipment-note.controller.js";
+import * as shipmentDocumentController from "./controllers/shipment-document.controller.js";
+import * as activityController from "./controllers/shipment-activity.controller.js";
 
 export const shipmentRoutes = Router();
 
@@ -22,6 +25,31 @@ shipmentRoutes.patch("/:id/close", authMiddleware, requirePermission(PERMISSIONS
 shipmentRoutes.patch("/:id/status", authMiddleware, requirePermission(PERMISSIONS.UPDATE_STATUS), statusController.updateStatus);
 shipmentRoutes.get("/:id/timeline", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), statusController.getTimeline);
 shipmentRoutes.get("/:id/status-summary", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), statusController.getStatusSummary);
+shipmentRoutes.get("/:id/activity-log", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), activityController.getActivityLog);
+
+shipmentRoutes.get("/:id/notes", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), noteController.listNotes);
+shipmentRoutes.post("/:id/notes", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), noteController.createNote);
+
+shipmentRoutes.get("/:id/documents", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), shipmentDocumentController.listDocuments);
+shipmentRoutes.post(
+  "/:id/documents",
+  authMiddleware,
+  requirePermission(PERMISSIONS.UPLOAD_DOCUMENT),
+  uploadSingle,
+  shipmentDocumentController.uploadDocument
+);
+shipmentRoutes.get(
+  "/:id/documents/:documentId/download",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  shipmentDocumentController.downloadDocument
+);
+shipmentRoutes.delete(
+  "/:id/documents/:documentId",
+  authMiddleware,
+  requirePermission(PERMISSIONS.UPDATE_SHIPMENT),
+  shipmentDocumentController.deleteDocument
+);
 
 shipmentRoutes.post("/:id/couple-po", authMiddleware, requirePermission(PERMISSIONS.COUPLE_DECOUPLE_PO), shipmentController.couplePo);
 shipmentRoutes.post("/:id/decouple-po", authMiddleware, requirePermission(PERMISSIONS.COUPLE_DECOUPLE_PO), shipmentController.decouplePo);

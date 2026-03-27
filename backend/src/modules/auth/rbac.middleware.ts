@@ -5,7 +5,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import { sendError } from "../../shared/response.js";
-import { hasPermission } from "../../shared/rbac.js";
+import { userHasPermission } from "../../shared/rbac.js";
 
 function ensureUser(req: Request, res: Response): boolean {
   if (!req.user) {
@@ -33,7 +33,8 @@ export function requirePermission(...permissions: string[]) {
   return function middleware(req: Request, res: Response, next: NextFunction): void {
     if (!ensureUser(req, res)) return;
     const role = req.user!.role;
-    const allowed = permissions.some((p) => hasPermission(role, p));
+    const overrides = req.user!.permission_overrides;
+    const allowed = permissions.some((p) => userHasPermission(role, overrides, p));
     if (!allowed) {
       sendError(res, "Forbidden", { statusCode: 403 });
       return;
