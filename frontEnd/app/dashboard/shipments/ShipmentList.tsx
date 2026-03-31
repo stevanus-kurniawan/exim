@@ -19,8 +19,10 @@ import {
   TableColumnPicker,
   TableColumnFilterPicker,
 } from "@/components/tables";
+import { Badge } from "@/components/badges";
 import { isApiError } from "@/types/api";
 import { displayPibTypeLabel } from "@/lib/pib-type-label";
+import { formatStatusLabel, statusToBadgeVariant } from "@/lib/status-badge";
 import type { ShipmentListItem, ShipmentListLinkedPo } from "@/types/shipments";
 import { formatDayMonthYear } from "@/lib/format-date";
 import type { ApiSuccess } from "@/types/api";
@@ -33,6 +35,7 @@ const SHIPMENT_LIST_TABLE_COLUMNS_KEY = "eos.dash.shipmentList.tableColumns.v2";
 
 const SHIPMENT_TABLE_COLUMNS: TableColumnDef[] = [
   { id: "shipment", label: "Shipment", locked: true },
+  { id: "status", label: "Status" },
   { id: "pt", label: "PT" },
   { id: "plant", label: "Plant" },
   { id: "po_number", label: "PO number" },
@@ -188,6 +191,8 @@ export function ShipmentList() {
         return [row.shipment_number ?? ""];
       case "pt":
         return [row.display_pt ?? ""];
+      case "status":
+        return [formatStatusLabel(row.current_status ?? "")];
       case "plant":
         return [row.display_plant ?? ""];
       case "po_number":
@@ -269,6 +274,14 @@ export function ShipmentList() {
         );
       case "pt":
         return <TableCell key={column.id}>{row.display_pt?.trim() || "—"}</TableCell>;
+      case "status":
+        return (
+          <TableCell key={column.id}>
+            <Badge variant={statusToBadgeVariant(row.current_status)}>
+              {formatStatusLabel(row.current_status)}
+            </Badge>
+          </TableCell>
+        );
       case "plant":
         return <TableCell key={column.id}>{row.display_plant?.trim() || "—"}</TableCell>;
       case "po_number":
