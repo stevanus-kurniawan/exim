@@ -107,6 +107,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => refreshSession());
   }, [refreshSession]);
 
+  useEffect(() => {
+    function onAccessRefreshed(e: Event) {
+      const detail = (e as CustomEvent<{ accessToken?: string }>).detail;
+      if (detail?.accessToken) {
+        setState((s) => ({ ...s, accessToken: detail.accessToken! }));
+      }
+    }
+    window.addEventListener("eos-access-token-refreshed", onAccessRefreshed);
+    return () => window.removeEventListener("eos-access-token-refreshed", onAccessRefreshed);
+  }, []);
+
   const login = useCallback(
     async (email: string, password: string): Promise<{ ok: boolean; error?: string; errors?: { field: string; message: string }[] }> => {
       setState((s) => ({ ...s, loading: true }));

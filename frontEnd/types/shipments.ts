@@ -24,6 +24,8 @@ export interface ShipmentListLinkedPo {
   pt: string | null;
   plant: string | null;
   taken_by_name: string | null;
+  currency: string | null;
+  intake_status: string | null;
   items: ShipmentListPoLineItem[];
 }
 
@@ -64,6 +66,7 @@ export interface ShipmentListItem {
   pic_name: string | null;
   display_pt: string | null;
   display_plant: string | null;
+  closed_at: string | null;
   linked_pos: ShipmentListLinkedPo[];
 }
 
@@ -182,6 +185,11 @@ export interface ListShipmentsQuery {
   /** Effective PO date: `imported_po_intake.po_date`, else intake created date (UTC). */
   po_from_date?: string;
   po_to_date?: string;
+  /**
+   * Matches backend: not closed (`closed_at` null) and status not DELIVERED.
+   * Use for KPIs such as dashboard “active” shipment count.
+   */
+  active_pipeline?: boolean;
 }
 
 export interface ShipmentTimelineEntry {

@@ -28,7 +28,7 @@ shipmentRoutes.get("/:id/status-summary", authMiddleware, requirePermission(PERM
 shipmentRoutes.get("/:id/activity-log", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), activityController.getActivityLog);
 
 shipmentRoutes.get("/:id/notes", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), noteController.listNotes);
-shipmentRoutes.post("/:id/notes", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), noteController.createNote);
+shipmentRoutes.post("/:id/notes", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), noteController.createNote);
 
 shipmentRoutes.get("/:id/documents", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), shipmentDocumentController.listDocuments);
 shipmentRoutes.post(

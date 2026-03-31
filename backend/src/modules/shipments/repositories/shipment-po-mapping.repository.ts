@@ -110,9 +110,12 @@ export class ShipmentPoMappingRepository {
       pt: string | null;
       plant: string | null;
       taken_by_name: string | null;
+      currency: string | null;
+      intake_status: string | null;
       items: ShipmentListPoLineItem[] | null;
     }>(
       `SELECT m.shipment_id, m.intake_id, i.po_number, i.pt, i.plant, u.name AS taken_by_name,
+        i.currency, i.intake_status,
         COALESCE(
           (SELECT json_agg(
             json_build_object(
@@ -146,6 +149,8 @@ export class ShipmentPoMappingRepository {
         pt: row.pt,
         plant: row.plant,
         taken_by_name: row.taken_by_name,
+        currency: row.currency ?? null,
+        intake_status: row.intake_status ?? null,
         items,
       });
       map.set(row.shipment_id, list);

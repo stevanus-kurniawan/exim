@@ -123,6 +123,15 @@ export function CreatePo() {
     setSubmitError(null);
     if (!accessToken) return;
 
+    if (!form.po_number.trim()) {
+      setSubmitError("PO number is required.");
+      return;
+    }
+    if (!form.supplier_name.trim()) {
+      setSubmitError("Supplier name is required.");
+      return;
+    }
+
     if (!form.pt.trim()) {
       setSubmitError("Please select PT.");
       return;
@@ -140,24 +149,26 @@ export function CreatePo() {
       return;
     }
 
-    const validItems = (form.items ?? []).filter(
-      (it) =>
-        it.item_description?.trim() ||
-        it.qtyText.trim() !== "" ||
-        it.unit?.trim() ||
-        it.priceText.trim() !== ""
-    );
-    if (validItems.length === 0) {
-      setSubmitError("Add at least one line item (e.g. description, quantity, or value).");
-      return;
-    }
-
-    for (const it of validItems) {
+    const completeItems = (form.items ?? []).filter((it) => {
+      const desc = it.item_description?.trim() ?? "";
+      const qty = parseOptionalDecimal(it.qtyText);
       const u = it.unit?.trim() ?? "";
-      if (u && !UNIT_OPTION_SET.has(u)) {
-        setSubmitError("Each line unit must be selected from the unit list.");
-        return;
-      }
+      const price = parseOptionalDecimal(it.priceText);
+      return (
+        desc !== "" &&
+        qty != null &&
+        qty > 0 &&
+        u !== "" &&
+        UNIT_OPTION_SET.has(u) &&
+        price != null &&
+        price >= 0
+      );
+    });
+    if (completeItems.length === 0) {
+      setSubmitError(
+        "Add at least one complete line item: description, quantity greater than 0, unit from the list, and price per unit."
+      );
+      return;
     }
 
     const payload: CreateTestPoPayload = {
@@ -172,7 +183,7 @@ export function CreatePo() {
     if (form.incoterm_location?.trim()) payload.incoterm_location = form.incoterm_location.trim();
     if (form.currency?.trim()) payload.currency = form.currency.trim();
 
-    payload.items = validItems.map((it) => {
+    payload.items = completeItems.map((it) => {
       const qty = parseOptionalDecimal(it.qtyText);
       const value = parseOptionalDecimal(it.priceText);
       return {

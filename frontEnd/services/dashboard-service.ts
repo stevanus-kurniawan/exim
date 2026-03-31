@@ -40,18 +40,17 @@ export async function getShipmentDashboardCounts(accessToken: string | null): Pr
   let customsClearance = 0;
   let delivered = 0;
   if (!accessToken) return { activeShipments, customsClearance, delivered };
-  const [rAll, rCustoms, rDelivered] = await Promise.all([
-    listShipments({ page: 1, limit: 1 }, accessToken),
+  const [rActive, rCustoms, rDelivered] = await Promise.all([
+    listShipments({ page: 1, limit: 1, active_pipeline: true }, accessToken),
     listShipments({ page: 1, limit: 1, status: "CUSTOMS_CLEARANCE" }, accessToken),
     listShipments({ page: 1, limit: 1, status: "DELIVERED" }, accessToken),
   ]);
-  if (!rAll.success) throw new Error(rAll.message ?? "Failed to load shipment counts");
+  if (!rActive.success) throw new Error(rActive.message ?? "Failed to load shipment counts");
   if (!rCustoms.success) throw new Error(rCustoms.message ?? "Failed to load shipment counts");
   if (!rDelivered.success) throw new Error(rDelivered.message ?? "Failed to load shipment counts");
-  const total = rAll.meta && typeof rAll.meta.total === "number" ? rAll.meta.total : 0;
+  if (rActive.meta && typeof rActive.meta.total === "number") activeShipments = rActive.meta.total;
   if (rCustoms.meta && typeof rCustoms.meta.total === "number") customsClearance = rCustoms.meta.total;
   if (rDelivered.meta && typeof rDelivered.meta.total === "number") delivered = rDelivered.meta.total;
-  activeShipments = total - delivered;
   return { activeShipments, customsClearance, delivered };
 }
 

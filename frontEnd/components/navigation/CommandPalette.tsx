@@ -14,6 +14,7 @@ interface CommandItem {
 }
 
 const MANAGE_USERS = "MANAGE_USERS";
+const VIEW_SHIPMENTS = "VIEW_SHIPMENTS";
 
 export function CommandPalette() {
   const router = useRouter();
@@ -28,6 +29,13 @@ export function CommandPalette() {
       { label: "Create Purchase Order", hint: "/dashboard/po/new", onRun: () => router.push("/dashboard/po/new") },
       { label: "Go to Shipments list", hint: "/dashboard/shipments", onRun: () => router.push("/dashboard/shipments") },
     ];
+    if (can(user, VIEW_SHIPMENTS)) {
+      items.push({
+        label: "Go to Management dashboard",
+        hint: "/dashboard/management",
+        onRun: () => router.push("/dashboard/management"),
+      });
+    }
     if (can(user, MANAGE_USERS)) {
       items.push({ label: "Go to User management", hint: "/dashboard/users", onRun: () => router.push("/dashboard/users") });
     }
