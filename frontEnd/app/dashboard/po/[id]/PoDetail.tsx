@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Fragment } from "react";
+import { useEffect, useState, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
@@ -31,9 +31,16 @@ import { formatDecimal } from "@/lib/format-number";
 import { formatPoLineQtyDisplay } from "@/lib/po-line-qty";
 import { formatDateTime, formatDayMonthYear } from "@/lib/format-date";
 import { formatYesNoOrLegacy } from "@/lib/yes-no-field";
+import { can } from "@/lib/permissions";
 import { isApiError } from "@/types/api";
 import type { PoDetail as PoDetailType } from "@/types/po";
+import { listShipments } from "@/services/shipments-service";
+import type { ShipmentListItem } from "@/types/shipments";
 import styles from "./PoDetail.module.css";
+
+function normalizeGroupField(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
 
 function lineTotalAmount(qty: number | null | undefined, valuePerUnit: number | null | undefined): number | null {
   if (qty == null || valuePerUnit == null) return null;
@@ -43,16 +50,18 @@ function lineTotalAmount(qty: number | null | undefined, valuePerUnit: number | 
 
 export function PoDetail({ id }: { id: string }) {
   const router = useRouter();
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const [detail, setDetail] = useState<PoDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [taking, setTaking] = useState(false);
-  const [creatingShipment, setCreatingShipment] = useState(false);
   const [coupleModal, setCoupleModal] = useState(false);
   const [coupleShipmentId, setCoupleShipmentId] = useState("");
   const [coupling, setCoupling] = useState(false);
+  const [coupleShipmentsList, setCoupleShipmentsList] = useState<ShipmentListItem[]>([]);
+  const [coupleShipmentsLoading, setCoupleShipmentsLoading] = useState(false);
+  const [coupleShipmentsError, setCoupleShipmentsError] = useState<string | null>(null);
   const [expandedLinkedShipmentIds, setExpandedLinkedShipmentIds] = useState<Set<string>>(() => new Set());
   const { pushToast } = useToast();
 
@@ -85,8 +94,56 @@ export function PoDetail({ id }: { id: string }) {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!coupleModal || !accessToken) return;
+    let cancelled = false;
+    setCoupleShipmentsLoading(true);
+    setCoupleShipmentsError(null);
+    listShipments({ limit: 100 }, accessToken)
+      .then((res) => {
+        if (cancelled) return;
+        if (isApiError(res)) {
+          setCoupleShipmentsError(res.message);
+          setCoupleShipmentsList([]);
+          return;
+        }
+        setCoupleShipmentsList(res.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCoupleShipmentsError("Failed to load shipments");
+          setCoupleShipmentsList([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCoupleShipmentsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [coupleModal, accessToken]);
+
+  const eligibleCoupleShipments = useMemo(() => {
+    if (!detail) return [];
+    const linkedIds = new Set((detail.linked_shipments ?? []).map((s) => s.shipment_id));
+    const poInco = normalizeGroupField(detail.incoterm_location);
+    const poCur = normalizeGroupField(detail.currency);
+    return coupleShipmentsList.filter((s) => {
+      if (s.closed_at) return false;
+      if (linkedIds.has(s.id)) return false;
+      if (normalizeGroupField(s.incoterm) !== poInco) return false;
+      const firstCur = normalizeGroupField(s.linked_pos[0]?.currency);
+      if (!s.linked_pos.length || firstCur !== poCur) return false;
+      for (const lp of s.linked_pos) {
+        if (normalizeGroupField(lp.currency) !== poCur) return false;
+      }
+      return true;
+    });
+  }, [detail, coupleShipmentsList]);
+
   function handleTakeOwnership() {
     if (!accessToken || !id) return;
+    if (!can(user, "TAKE_OWNERSHIP") || !can(user, "CREATE_SHIPMENT")) return;
     setActionError(null);
     setTaking(true);
     takeOwnership(id, accessToken)
@@ -94,26 +151,20 @@ export function PoDetail({ id }: { id: string }) {
         if (isApiError(res)) {
           setActionError(res.message);
           pushToast(res.message, "error");
-          return;
+          return null;
         }
         if (res.data) setDetail(res.data);
         pushToast("Purchase Order claimed.", "success");
+        return createShipmentFromPo(id, accessToken);
       })
-      .finally(() => setTaking(false));
-  }
-
-  function handleCreateShipment() {
-    if (!accessToken || !id) return;
-    setActionError(null);
-    setCreatingShipment(true);
-    createShipmentFromPo(id, accessToken)
-      .then((res) => {
-        if (isApiError(res)) {
-          setActionError(res.message);
-          pushToast(res.message, "error");
+      .then((shipRes) => {
+        if (!shipRes) return;
+        if (isApiError(shipRes)) {
+          setActionError(shipRes.message);
+          pushToast(shipRes.message, "error");
           return;
         }
-        const data = res.data as { shipment_id?: string };
+        const data = shipRes.data as { shipment_id?: string };
         if (data?.shipment_id) {
           pushToast("Shipment created from Purchase Order.", "success");
           router.push(`/dashboard/shipments/${data.shipment_id}`);
@@ -122,11 +173,12 @@ export function PoDetail({ id }: { id: string }) {
           load();
         }
       })
-      .finally(() => setCreatingShipment(false));
+      .finally(() => setTaking(false));
   }
 
   function handleCoupleToShipment() {
     if (!accessToken || !id || !coupleShipmentId.trim()) return;
+    if (!can(user, "COUPLE_DECOUPLE_PO")) return;
     setActionError(null);
     setCoupling(true);
     couplePoToShipment(id, coupleShipmentId.trim(), accessToken)
@@ -160,6 +212,10 @@ export function PoDetail({ id }: { id: string }) {
   const canTake = st === "NEW_PO_DETECTED" || canTakeAgain;
   /** Create / couple from PO page without requiring claim first (grouping can start while status is NEW_PO_DETECTED). */
   const canCreateOrCouple = st !== "FULFILLED";
+  /** Matches POST /po/:id/take then POST /po/:id/create-shipment (both permissions required for current flow). */
+  const canClaimAndCreateShipment =
+    can(user, "TAKE_OWNERSHIP") && can(user, "CREATE_SHIPMENT");
+  const canCoupleToShipment = can(user, "COUPLE_DECOUPLE_PO");
 
   /** Same field as Create PO / API `currency` (e.g. USD, IDR) — not the per-line rate. */
   const poCurrency = detail.currency?.trim() || null;
@@ -246,34 +302,27 @@ export function PoDetail({ id }: { id: string }) {
         </div>
 
         <div className={styles.actions}>
-          {canTake && (
+          {canTake && canClaimAndCreateShipment && (
             <Button
               type="button"
               variant="primary"
               onClick={handleTakeOwnership}
               disabled={taking}
             >
-              {taking ? "Claiming…" : canTakeAgain ? "Claim again" : "Claim"}
+              {taking ? "Claiming & creating shipment…" : canTakeAgain ? "Claim again" : "Claim"}
             </Button>
           )}
-          {canCreateOrCouple && (
-            <>
-              <Button
-                type="button"
-                variant="primary"
-                onClick={handleCreateShipment}
-                disabled={creatingShipment}
-              >
-                {creatingShipment ? "Creating…" : "Create shipment"}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setCoupleModal(true)}
-              >
-                Couple to shipment
-              </Button>
-            </>
+          {canCreateOrCouple && canCoupleToShipment && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setCoupleShipmentId("");
+                setCoupleModal(true);
+              }}
+            >
+              Couple to shipment
+            </Button>
           )}
           {canTakeAgain && (
             <span className={styles.fieldValue}>
@@ -432,7 +481,10 @@ export function PoDetail({ id }: { id: string }) {
 
       <Modal
         open={coupleModal}
-        onClose={() => setCoupleModal(false)}
+        onClose={() => {
+          setCoupleModal(false);
+          setCoupleShipmentId("");
+        }}
         title="Couple to shipment"
         footer={
           <>
@@ -450,8 +502,48 @@ export function PoDetail({ id }: { id: string }) {
           </>
         }
       >
+        <p className={styles.coupleModalHint}>
+          Shipments below match this PO&apos;s incoterm ({detail.incoterm_location ?? "—"}) and currency (
+          {poCurrency ?? "—"}), are not closed, and are not already linked to this PO — same rules as grouping
+          on the server.
+        </p>
+        {coupleShipmentsLoading && <p className={styles.fieldValue}>Loading shipments…</p>}
+        {coupleShipmentsError && <p className={styles.error}>{coupleShipmentsError}</p>}
+        {!coupleShipmentsLoading && !coupleShipmentsError && eligibleCoupleShipments.length === 0 && (
+          <p className={styles.fieldValue}>No matching open shipments found. Use the shipment ID field below or create a shipment via Claim.</p>
+        )}
+        {eligibleCoupleShipments.length > 0 && (
+          <ul className={styles.coupleCandidateList} aria-label="Shipments available to couple">
+            {eligibleCoupleShipments.map((s) => {
+              const poLabels = s.linked_pos.map((p) => p.po_number).join(", ");
+              const hasNew = s.linked_pos.some((p) => p.intake_status === "NEW_PO_DETECTED");
+              const selected = coupleShipmentId === s.id;
+              return (
+                <li key={s.id} className={styles.coupleCandidateRow}>
+                  <div className={styles.coupleCandidateMain}>
+                    <span className={styles.shipmentNumber}>{s.shipment_number}</span>
+                    <Badge variant={statusToBadgeVariant(s.current_status)}>{formatStatusLabel(s.current_status)}</Badge>
+                    {hasNew && (
+                      <Badge variant="neutral" className={styles.coupleNewBadge}>
+                        Includes new PO
+                      </Badge>
+                    )}
+                  </div>
+                  <div className={styles.coupleCandidatePoLines}>PO on shipment: {poLabels || "—"}</div>
+                  <button
+                    type="button"
+                    className={selected ? styles.couplePickBtnSelected : styles.couplePickBtn}
+                    onClick={() => setCoupleShipmentId(s.id)}
+                  >
+                    {selected ? "Selected" : "Use this shipment"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
         <label className={styles.field}>
-          <span className={styles.fieldLabel}>Shipment ID (UUID)</span>
+          <span className={styles.fieldLabel}>Shipment ID (UUID) — optional if you pick above</span>
           <input
             type="text"
             className={styles.input}

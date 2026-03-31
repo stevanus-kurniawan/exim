@@ -134,6 +134,10 @@ export class ShipmentRepository {
       params.push(`%${query.po_number}%`);
       idx++;
     }
+    if (query.active_pipeline) {
+      conditions.push(`s.closed_at IS NULL`);
+      conditions.push(`s.current_status <> 'DELIVERED'`);
+    }
     if (query.po_from_date || query.po_to_date) {
       const poDateParts = [
         `EXISTS (

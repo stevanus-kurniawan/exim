@@ -14,12 +14,14 @@ import { PageHeader, EmptyState } from "@/components/navigation";
 import { Badge } from "@/components/badges";
 import { IconBox, IconClock, IconShip, IconDocument, IconCheck } from "@/components/icons/KpiIcons";
 import { statusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
+import { can } from "@/lib/permissions";
 import { isApiError } from "@/types/api";
 import type { ShipmentListItem } from "@/types/shipments";
 import type { ApiSuccess } from "@/types/api";
 import styles from "./DashboardContent.module.css";
 
 const RECENT_LIMIT = 5;
+const VIEW_SHIPMENTS = "VIEW_SHIPMENTS";
 
 export function DashboardContent() {
   const { user, accessToken, loading: authLoading } = useAuth();
@@ -87,7 +89,7 @@ export function DashboardContent() {
           label="Active shipments"
           value={shipmentCounts.activeShipments}
           href="/dashboard/shipments"
-          aria-label="Active shipments"
+          aria-label="Shipments in progress (not delivered and not closed)"
           icon={<IconShip />}
         />
         <StatsCard
@@ -115,6 +117,11 @@ export function DashboardContent() {
           <Link href="/dashboard/shipments" className={styles.btnSecondary}>
             View shipments
           </Link>
+          {can(user, VIEW_SHIPMENTS) && (
+            <Link href="/dashboard/management" className={styles.btnSecondary}>
+              Management dashboard
+            </Link>
+          )}
         </div>
       </div>
 

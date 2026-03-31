@@ -77,16 +77,19 @@ import { config } from "@/lib/config";
 import { getCountryOptions } from "@/lib/countries";
 import { getVisibleShipmentDocumentSlots } from "@/lib/shipment-document-slots";
 import { parseYesNoSelectValue, formatYesNoOrLegacy } from "@/lib/yes-no-field";
+import { can } from "@/lib/permissions";
 import styles from "./ShipmentDetail.module.css";
 import { formatDayMonthYear } from "@/lib/format-date";
 
 /** Destination port country is fixed for this product. */
 const DESTINATION_PORT_COUNTRY = "Indonesia";
 
-const PRODUCT_CLASSIFICATION_OPTIONS = ["Checmical", "Package", "Spare Parts"] as const;
+const PRODUCT_CLASSIFICATION_OPTIONS = ["Chemical", "Package", "Spare Parts"] as const;
 
+/** Normalize legacy / misspelled values stored before the Chemical label fix. */
 const PRODUCT_CLASSIFICATION_LEGACY_TO_CURRENT: Record<string, string> = {
-  Chemical: "Checmical",
+  Chemical: "Chemical",
+  Checmical: "Chemical",
   Packaging: "Package",
 };
 
@@ -153,8 +156,6 @@ const SHIPMENT_STATUSES = [
   "CUSTOMS_CLEARANCE",
   "DELIVERED",
 ];
-
-const ROLES_CAN_EDIT_SHIPMENT = ["exim", "admin"];
 
 const DUTY_FORMULA_BM = "BM = BM% × Total PO amount.";
 
@@ -448,7 +449,11 @@ function DutyFormulaHint({ text }: { text: string }) {
 export function ShipmentDetail({ id }: { id: string }) {
   const { user, accessToken } = useAuth();
   const { pushToast } = useToast();
-  const canEditShipment = ROLES_CAN_EDIT_SHIPMENT.includes(user?.role?.toLowerCase() ?? "");
+  /** Matches backend PUT/PATCH shipment, bids, PO mapping/lines, doc delete, POST notes. */
+  const canEditShipment = can(user, "UPDATE_SHIPMENT");
+  const canUploadDocument = can(user, "UPLOAD_DOCUMENT");
+  const canUpdateStatus = can(user, "UPDATE_STATUS");
+  const canCoupleDecouplePo = can(user, "COUPLE_DECOUPLE_PO");
   const [detail, setDetail] = useState<ShipmentDetailType | null>(null);
   const [timeline, setTimeline] = useState<ShipmentTimelineEntry[]>([]);
   const [statusSummary, setStatusSummary] = useState<{ current_status: string; last_updated_at?: string } | null>(null);
@@ -621,7 +626,7 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   function handleAddShipmentNote(e: React.FormEvent) {
     e.preventDefault();
-    if (!accessToken || !id) return;
+    if (!accessToken || !id || !canEditShipment) return;
     const text = noteDraft.trim();
     if (!text) return;
     setActionError(null);
@@ -643,7 +648,7 @@ export function ShipmentDetail({ id }: { id: string }) {
   }
 
   function enterUpdateMode() {
-    if (!detail) return;
+    if (!detail || !canEditShipment) return;
     setEditVendorName(detail.vendor_name ?? "");
     setEditForwarderName(detail.forwarder_name ?? "");
     setEditWarehouseName(detail.warehouse_name ?? "");
@@ -701,6 +706,7 @@ export function ShipmentDetail({ id }: { id: string }) {
   function handleUpdateStatus(e: React.FormEvent) {
     e.preventDefault();
     if (isUpdatingShipment) return;
+    if (!canUpdateStatus) return;
     if (!accessToken || !id || !newStatus.trim()) return;
     setActionError(null);
     setUpdatingStatus(true);
@@ -725,7 +731,7 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   function handleCouplePo(e: React.FormEvent) {
     e.preventDefault();
-    if (!accessToken || !id) return;
+    if (!accessToken || !id || !canCoupleDecouplePo) return;
     const tokens = coupleIntakeIds
       .split(/[\s,]+/)
       .map((s) => s.trim())
@@ -782,7 +788,7 @@ export function ShipmentDetail({ id }: { id: string }) {
   }
 
   function handleDecouple(intakeId: string) {
-    if (!accessToken || !id) return;
+    if (!accessToken || !id || !canCoupleDecouplePo) return;
     setActionError(null);
     setDecouplingId(intakeId);
     decouplePo(id, intakeId, undefined, accessToken)
@@ -800,7 +806,7 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   function handleAddBid(e: React.FormEvent) {
     e.preventDefault();
-    if (!accessToken || !id || !bidForwarder.trim()) return;
+    if (!accessToken || !id || !bidForwarder.trim() || !canEditShipment) return;
     setActionError(null);
     setAddingBid(true);
     createShipmentBid(
@@ -849,7 +855,7 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   function handleSaveBid(e: React.FormEvent) {
     e.preventDefault();
-    if (!accessToken || !id || !editingBidId) return;
+    if (!accessToken || !id || !editingBidId || !canEditShipment) return;
     setActionError(null);
     updateShipmentBid(
       id,
@@ -877,7 +883,7 @@ export function ShipmentDetail({ id }: { id: string }) {
   }
 
   function handleDeleteBid(bidId: string) {
-    if (!accessToken || !id) return;
+    if (!accessToken || !id || !canEditShipment) return;
     setActionError(null);
     deleteShipmentBid(id, bidId, accessToken).then((res) => {
       if (isApiError(res)) {
@@ -891,7 +897,7 @@ export function ShipmentDetail({ id }: { id: string }) {
   }
 
   function handleQuotationUpload(bidId: string, file: File | null) {
-    if (!accessToken || !id || !file) return;
+    if (!accessToken || !id || !file || !canUploadDocument) return;
     setActionError(null);
     setUploadingQuotationForBidId(bidId);
     uploadShipmentBidQuotation(id, bidId, file, accessToken)
@@ -1410,20 +1416,37 @@ export function ShipmentDetail({ id }: { id: string }) {
       const isIdr = (firstCurrency ?? "").trim().toUpperCase() === "IDR";
       const rateRaw = stripCommaThousands((poEditCurrencyRateByIntake[first.intake_id] ?? "").trim());
       const parsedRate = rateRaw ? Number(rateRaw) : undefined;
-      if (!isIdr && (!Number.isFinite(parsedRate) || (parsedRate ?? 0) <= 0)) {
+      const currentStatus = detail?.current_status ?? "";
+      const customsIdx = SHIPMENT_STATUSES.indexOf("CUSTOMS_CLEARANCE");
+      const statusIdx = SHIPMENT_STATUSES.indexOf(currentStatus);
+      const enforceNonIdrCurrencyRate = !isIdr && customsIdx >= 0 && statusIdx >= customsIdx;
+
+      if (enforceNonIdrCurrencyRate && (!Number.isFinite(parsedRate) || (parsedRate ?? 0) <= 0)) {
         const msg = "Currency rate is required and must be greater than 0 for non-IDR currency.";
         setActionError(msg);
         pushToast(msg, "error");
         return false;
       }
-      const currencyRate = isIdr ? null : parsedRate ?? null;
+
+      let currencyRateForApi: number | null | undefined;
+      if (isIdr) {
+        currencyRateForApi = null;
+      } else if (enforceNonIdrCurrencyRate) {
+        currencyRateForApi = parsedRate ?? null;
+      } else if (Number.isFinite(parsedRate) && (parsedRate ?? 0) > 0) {
+        currencyRateForApi = parsedRate;
+      } else {
+        currencyRateForApi = undefined;
+      }
+
       for (const po of linkedPos) {
-        const mapRes = await updateShipmentPoMapping(
-          id,
-          po.intake_id,
-          { invoice_no: invoiceNo ?? null, currency_rate: currencyRate },
-          accessToken
-        );
+        const mappingPayload: { invoice_no?: string | null; currency_rate?: number | null } = {
+          invoice_no: invoiceNo ?? null,
+        };
+        if (currencyRateForApi !== undefined) {
+          mappingPayload.currency_rate = currencyRateForApi;
+        }
+        const mapRes = await updateShipmentPoMapping(id, po.intake_id, mappingPayload, accessToken);
         if (isApiError(mapRes)) {
           setActionError(mapRes.message);
           pushToast(mapRes.message, "error");
@@ -1850,72 +1873,78 @@ export function ShipmentDetail({ id }: { id: string }) {
             <Card id="section-forwarder-bidding" className={`${styles.card} ${biddingCardHighlightClass}`.trim()}>
               <h2 className={styles.categoryTitle}>Forwarder Bidding Transporters</h2>
               <p className={styles.placeholderNote}>This section is shown only when the shipment incoterm is <strong>EXW</strong>, <strong>FCA</strong>, or <strong>FOB</strong> (buyer arranges transport). Forwarders (delivery service companies) participate in the bidding process. Add participants with service amount, duration, ports, and optional quotation.</p>
-              <form onSubmit={handleAddBid} className={styles.bidForm}>
-                <div className={styles.bidFormGrid}>
-                  <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="bid-forwarder">Forwarder name *</label>
-                    <input id="bid-forwarder" type="text" className={styles.input} value={bidForwarder} onChange={(e) => setBidForwarder(e.target.value)} placeholder="Forwarder / delivery company name" required />
-                  </div>
-                  <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="bid-service-amount">Service amount</label>
-                    <input
-                      id="bid-service-amount"
-                      type="text"
-                      inputMode="decimal"
-                      autoComplete="off"
-                      className={styles.input}
-                      value={bidServiceAmount}
-                      onChange={(e) => setBidServiceAmount(formatPriceInputWithCommas(e.target.value))}
-                      placeholder="1,234.56"
-                      aria-label="Service amount"
-                    />
-                  </div>
-                  <div className={styles.field}>
-                    <span className={styles.fieldLabel} id="bid-duration-label">
-                      Duration
-                    </span>
-                    <div className={styles.durationFieldRow} role="group" aria-labelledby="bid-duration-label">
+              {canEditShipment ? (
+                <form onSubmit={handleAddBid} className={styles.bidForm}>
+                  <div className={styles.bidFormGrid}>
+                    <div className={styles.field}>
+                      <label className={styles.fieldLabel} htmlFor="bid-forwarder">Forwarder name *</label>
+                      <input id="bid-forwarder" type="text" className={styles.input} value={bidForwarder} onChange={(e) => setBidForwarder(e.target.value)} placeholder="Forwarder / delivery company name" required />
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.fieldLabel} htmlFor="bid-service-amount">Service amount</label>
                       <input
-                        id="bid-duration"
+                        id="bid-service-amount"
                         type="text"
-                        inputMode="numeric"
+                        inputMode="decimal"
                         autoComplete="off"
                         className={styles.input}
-                        value={bidDuration}
-                        onChange={(e) => setBidDuration(e.target.value.replace(/\D/g, ""))}
-                        placeholder="0"
-                        aria-label="Duration in days"
+                        value={bidServiceAmount}
+                        onChange={(e) => setBidServiceAmount(formatPriceInputWithCommas(e.target.value))}
+                        placeholder="1,234.56"
+                        aria-label="Service amount"
                       />
-                      <span className={styles.durationSuffix}>days</span>
+                    </div>
+                    <div className={styles.field}>
+                      <span className={styles.fieldLabel} id="bid-duration-label">
+                        Duration
+                      </span>
+                      <div className={styles.durationFieldRow} role="group" aria-labelledby="bid-duration-label">
+                        <input
+                          id="bid-duration"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className={styles.input}
+                          value={bidDuration}
+                          onChange={(e) => setBidDuration(e.target.value.replace(/\D/g, ""))}
+                          placeholder="0"
+                          aria-label="Duration in days"
+                        />
+                        <span className={styles.durationSuffix}>days</span>
+                      </div>
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.fieldLabel} htmlFor="bid-origin-port">Origin port</label>
+                      <input id="bid-origin-port" type="text" className={styles.input} value={bidOriginPort} onChange={(e) => setBidOriginPort(e.target.value)} placeholder="Port of loading" />
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.fieldLabel} htmlFor="bid-destination-port">Destination port</label>
+                      <input id="bid-destination-port" type="text" className={styles.input} value={bidDestinationPort} onChange={(e) => setBidDestinationPort(e.target.value)} placeholder="Port of discharge" />
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.fieldLabel} htmlFor="bid-ship-via">Ship via</label>
+                      <select id="bid-ship-via" className={styles.input} value={bidShipVia} onChange={(e) => setBidShipVia(e.target.value)}>
+                        <option value="">— Select —</option>
+                        <option value="Sea">Sea</option>
+                        <option value="Air">Air</option>
+                      </select>
                     </div>
                   </div>
-                  <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="bid-origin-port">Origin port</label>
-                    <input id="bid-origin-port" type="text" className={styles.input} value={bidOriginPort} onChange={(e) => setBidOriginPort(e.target.value)} placeholder="Port of loading" />
+                  <div className={styles.bidFormActions}>
+                    <Button type="submit" variant="primary" disabled={addingBid || !bidForwarder.trim()}>
+                      {addingBid ? "Adding…" : "Add participant"}
+                    </Button>
                   </div>
-                  <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="bid-destination-port">Destination port</label>
-                    <input id="bid-destination-port" type="text" className={styles.input} value={bidDestinationPort} onChange={(e) => setBidDestinationPort(e.target.value)} placeholder="Port of discharge" />
-                  </div>
-                  <div className={styles.field}>
-                    <label className={styles.fieldLabel} htmlFor="bid-ship-via">Ship via</label>
-                    <select id="bid-ship-via" className={styles.input} value={bidShipVia} onChange={(e) => setBidShipVia(e.target.value)}>
-                      <option value="">— Select —</option>
-                      <option value="Sea">Sea</option>
-                      <option value="Air">Air</option>
-                    </select>
-                  </div>
-                </div>
-                <div className={styles.bidFormActions}>
-                  <Button type="submit" variant="primary" disabled={addingBid || !bidForwarder.trim()}>
-                    {addingBid ? "Adding…" : "Add participant"}
-                  </Button>
-                </div>
-              </form>
+                </form>
+              ) : (
+                <p className={styles.placeholder}>You do not have permission to add or edit bidding participants.</p>
+              )}
               {loadingBids ? (
                 <p className={styles.placeholder}>Loading bidding participants…</p>
               ) : bids.length === 0 ? (
-                <p className={styles.placeholder}>No bidding participants yet. Add one above.</p>
+                <p className={styles.placeholder}>
+                  {canEditShipment ? "No bidding participants yet. Add one above." : "No bidding participants yet."}
+                </p>
               ) : (
                 <div className={styles.bidList}>
                   {bids.map((bid) => (
@@ -1988,10 +2017,12 @@ export function ShipmentDetail({ id }: { id: string }) {
                         <>
                           <div className={styles.bidCardHeader}>
                             <strong>{bid.forwarder_name}</strong>
-                            <div className={styles.bidCardActions}>
-                              <Button type="button" variant="secondary" onClick={() => startEditBid(bid)}>Edit</Button>
-                              <Button type="button" variant="secondary" onClick={() => handleDeleteBid(bid.id)}>Delete</Button>
-                            </div>
+                            {canEditShipment && (
+                              <div className={styles.bidCardActions}>
+                                <Button type="button" variant="secondary" onClick={() => startEditBid(bid)}>Edit</Button>
+                                <Button type="button" variant="secondary" onClick={() => handleDeleteBid(bid.id)}>Delete</Button>
+                              </div>
+                            )}
                           </div>
                           <div className={styles.bidCardGrid}>
                             <div className={styles.field}>
@@ -2020,16 +2051,22 @@ export function ShipmentDetail({ id }: { id: string }) {
                             {bid.quotation_file_name ? (
                               <span>
                                 <button type="button" className={styles.bidLink} onClick={() => handleQuotationDownload(bid)}>{bid.quotation_file_name}</button>
-                                <label className={styles.bidUploadLabel}>
-                                  Replace: <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleQuotationUpload(bid.id, f); e.target.value = ""; }} disabled={uploadingQuotationForBidId === bid.id} />
-                                  {uploadingQuotationForBidId === bid.id && " Uploading…"}
-                                </label>
+                                {canUploadDocument && (
+                                  <label className={styles.bidUploadLabel}>
+                                    Replace: <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleQuotationUpload(bid.id, f); e.target.value = ""; }} disabled={uploadingQuotationForBidId === bid.id} />
+                                    {uploadingQuotationForBidId === bid.id && " Uploading…"}
+                                  </label>
+                                )}
                               </span>
                             ) : (
-                              <label className={styles.bidUploadLabel}>
-                                <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleQuotationUpload(bid.id, f); e.target.value = ""; }} disabled={uploadingQuotationForBidId === bid.id} />
-                                {uploadingQuotationForBidId === bid.id ? " Uploading…" : "Upload quotation"}
-                              </label>
+                              canUploadDocument ? (
+                                <label className={styles.bidUploadLabel}>
+                                  <input type="file" accept=".pdf,.doc,.docx,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleQuotationUpload(bid.id, f); e.target.value = ""; }} disabled={uploadingQuotationForBidId === bid.id} />
+                                  {uploadingQuotationForBidId === bid.id ? " Uploading…" : "Upload quotation"}
+                                </label>
+                              ) : (
+                                <span className={styles.fieldValue}>—</span>
+                              )
                             )}
                           </div>
                         </>
@@ -2766,21 +2803,27 @@ export function ShipmentDetail({ id }: { id: string }) {
         <p className={styles.linkedPoHint}>
           Each PO is shown as a card below. You can expand multiple POs and review each line-items table independently.
         </p>
-        <div className={`${styles.actions} ${styles.linkedPoActions}`}>
-          <Button
-            type="button"
-            variant="primary"
-            className={styles.updateShipmentBtn}
-            onClick={() => {
-              setCoupleModalError(null);
-              setCoupleModal(true);
-            }}
-          >
-            Add Purchase Order
-          </Button>
-        </div>
+        {canCoupleDecouplePo && (
+          <div className={`${styles.actions} ${styles.linkedPoActions}`}>
+            <Button
+              type="button"
+              variant="primary"
+              className={styles.updateShipmentBtn}
+              onClick={() => {
+                setCoupleModalError(null);
+                setCoupleModal(true);
+              }}
+            >
+              Add Purchase Order
+            </Button>
+          </div>
+        )}
         {detail.linked_pos.length === 0 ? (
-          <p className={styles.placeholder}>No PO in this group yet. Use &quot;Add Purchase Order&quot; to add.</p>
+          <p className={styles.placeholder}>
+            {canCoupleDecouplePo
+              ? `No PO in this group yet. Use "Add Purchase Order" to add.`
+              : "No PO in this group yet."}
+          </p>
         ) : (
           <div className={styles.linkedPoList} role="list">
             {detail.linked_pos.map((po) => {
@@ -2851,16 +2894,18 @@ export function ShipmentDetail({ id }: { id: string }) {
                         </div>
                       </div>
                     </div>
-                    <div className={styles.linkedPoCardActions}>
-                      <button
-                        type="button"
-                        className={styles.decoupleBtn}
-                        onClick={() => handleDecouple(po.intake_id)}
-                        disabled={decouplingId === po.intake_id}
-                      >
-                        {decouplingId === po.intake_id ? "Removing…" : "Remove"}
-                      </button>
-                    </div>
+                    {canCoupleDecouplePo && (
+                      <div className={styles.linkedPoCardActions}>
+                        <button
+                          type="button"
+                          className={styles.decoupleBtn}
+                          onClick={() => handleDecouple(po.intake_id)}
+                          disabled={decouplingId === po.intake_id}
+                        >
+                          {decouplingId === po.intake_id ? "Removing…" : "Remove"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {isExpanded && (
                     <div className={styles.linkedPoCardBody}>
@@ -3016,24 +3061,28 @@ export function ShipmentDetail({ id }: { id: string }) {
 
       <Card id="section-notes" className={`${styles.card} ${styles.sectionScrollTarget}`}>
         <h2 className={styles.categoryTitle}>Notes</h2>
-        <form onSubmit={handleAddShipmentNote} className={styles.noteComposer}>
-          <label className={styles.field} htmlFor="shipment-note-draft">
-            <span className={styles.fieldLabel}>Add a note</span>
-            <textarea
-              id="shipment-note-draft"
-              className={styles.notesTextarea}
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              placeholder="Write a note…"
-              rows={4}
-            />
-          </label>
-          <div className={styles.notesActions}>
-            <Button type="submit" variant="primary" disabled={savingNote || !noteDraft.trim()}>
-              {savingNote ? "Posting…" : "Post note"}
-            </Button>
-          </div>
-        </form>
+        {canEditShipment ? (
+          <form onSubmit={handleAddShipmentNote} className={styles.noteComposer}>
+            <label className={styles.field} htmlFor="shipment-note-draft">
+              <span className={styles.fieldLabel}>Add a note</span>
+              <textarea
+                id="shipment-note-draft"
+                className={styles.notesTextarea}
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder="Write a note…"
+                rows={4}
+              />
+            </label>
+            <div className={styles.notesActions}>
+              <Button type="submit" variant="primary" disabled={savingNote || !noteDraft.trim()}>
+                {savingNote ? "Posting…" : "Post note"}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <p className={styles.placeholder}>You do not have permission to add notes to this shipment.</p>
+        )}
         <ul className={styles.noteList} aria-label="Shipment notes">
           {shipmentNotes.length === 0 ? (
             <li className={styles.noteEmpty}>No note yet.</li>
@@ -3063,85 +3112,91 @@ export function ShipmentDetail({ id }: { id: string }) {
         />
         <div className={styles.timelineUpdateSection}>
           <h3 className={styles.timelineUpdateTitle}>Update status</h3>
-          {isUpdatingShipment && (
-            <p className={styles.statusPausedHint} role="status">
-              Save or cancel your shipment edits first — status cannot change until draft data is saved or discarded.
-            </p>
+          {canUpdateStatus ? (
+            <>
+              {isUpdatingShipment && (
+                <p className={styles.statusPausedHint} role="status">
+                  Save or cancel your shipment edits first — status cannot change until draft data is saved or discarded.
+                </p>
+              )}
+              <form onSubmit={handleUpdateStatus}>
+                <fieldset className={styles.statusUpdateFieldset} disabled={isUpdatingShipment}>
+                  <div className={styles.statusRow}>
+                    <label htmlFor="shipment-status-select" className={styles.field}>
+                      <span className={styles.fieldLabel}>New status</span>
+                      <select
+                        id="shipment-status-select"
+                        className={styles.statusSelect}
+                        value={newStatus}
+                        onChange={(e) => setNewStatus(e.target.value)}
+                      >
+                        <option value="">Select next status…</option>
+                        {nextStatusOptions.map((s) => (
+                          <option key={s} value={s}>
+                            {formatStatusLabel(s)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {newStatus.trim() && requiredFieldsForStatusUpdate.length > 0 && (
+                    <p className={styles.statusRequiredLegend}>
+                      Highlighted rows are required for this update and still missing.
+                    </p>
+                  )}
+                  {newStatus.trim() && missingForStatusUpdate.length > 0 && (
+                    <div className={styles.missingFieldsBox} role="alert">
+                      <span className={styles.missingFieldsTitle}>
+                        Still required — click to scroll to the field or the Documents section:
+                      </span>
+                      <ul className={styles.missingFieldsList}>
+                        {missingForStatusUpdate.map((key) => (
+                          <li key={key}>
+                            <button
+                              type="button"
+                              className={styles.missingFieldJump}
+                              onClick={() => scrollToStatusRequirement(key)}
+                            >
+                              {getFieldLabel(key)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className={styles.missingFieldsHint}>Highlighted rows show what this status needs; fix them in the cards or via &quot;Update shipment&quot;.</p>
+                    </div>
+                  )}
+                  {newStatus.trim() && requiredDocsForUpdate.length > 0 && (
+                    <p className={styles.requiredDocsNote}>
+                      Required documents: {requiredDocsForUpdate.join("; ")}
+                    </p>
+                  )}
+                  <div className={styles.statusRow}>
+                    <label className={styles.field}>
+                      <span className={styles.fieldLabel}>Remarks (optional)</span>
+                      <input
+                        type="text"
+                        className={styles.input}
+                        value={remarks}
+                        onChange={(e) => setRemarks(e.target.value)}
+                        placeholder="Remarks"
+                      />
+                    </label>
+                  </div>
+                  <div className={styles.statusFormActions}>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={updatingStatus || !canProceedStatusUpdate || isUpdatingShipment}
+                    >
+                      {updatingStatus ? "Updating…" : "Update status"}
+                    </Button>
+                  </div>
+                </fieldset>
+              </form>
+            </>
+          ) : (
+            <p className={styles.placeholder}>You do not have permission to change shipment status.</p>
           )}
-          <form onSubmit={handleUpdateStatus}>
-            <fieldset className={styles.statusUpdateFieldset} disabled={isUpdatingShipment}>
-              <div className={styles.statusRow}>
-                <label htmlFor="shipment-status-select" className={styles.field}>
-                  <span className={styles.fieldLabel}>New status</span>
-                  <select
-                    id="shipment-status-select"
-                    className={styles.statusSelect}
-                    value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value)}
-                  >
-                    <option value="">Select next status…</option>
-                    {nextStatusOptions.map((s) => (
-                      <option key={s} value={s}>
-                        {formatStatusLabel(s)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {newStatus.trim() && requiredFieldsForStatusUpdate.length > 0 && (
-                <p className={styles.statusRequiredLegend}>
-                  Highlighted rows are required for this update and still missing.
-                </p>
-              )}
-              {newStatus.trim() && missingForStatusUpdate.length > 0 && (
-                <div className={styles.missingFieldsBox} role="alert">
-                  <span className={styles.missingFieldsTitle}>
-                    Still required — click to scroll to the field or the Documents section:
-                  </span>
-                  <ul className={styles.missingFieldsList}>
-                    {missingForStatusUpdate.map((key) => (
-                      <li key={key}>
-                        <button
-                          type="button"
-                          className={styles.missingFieldJump}
-                          onClick={() => scrollToStatusRequirement(key)}
-                        >
-                          {getFieldLabel(key)}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className={styles.missingFieldsHint}>Highlighted rows show what this status needs; fix them in the cards or via &quot;Update shipment&quot;.</p>
-                </div>
-              )}
-              {newStatus.trim() && requiredDocsForUpdate.length > 0 && (
-                <p className={styles.requiredDocsNote}>
-                  Required documents: {requiredDocsForUpdate.join("; ")}
-                </p>
-              )}
-              <div className={styles.statusRow}>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Remarks (optional)</span>
-                  <input
-                    type="text"
-                    className={styles.input}
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="Remarks"
-                  />
-                </label>
-              </div>
-              <div className={styles.statusFormActions}>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={updatingStatus || !canProceedStatusUpdate || isUpdatingShipment}
-                >
-                  {updatingStatus ? "Updating…" : "Update status"}
-                </Button>
-              </div>
-            </fieldset>
-          </form>
           {statusSummary?.last_updated_at && (
             <p className={`${styles.fieldLabel} ${styles.statusSummaryMargin}`}>
               Last updated: {new Date(statusSummary.last_updated_at).toLocaleString()}
@@ -3188,7 +3243,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                           <div key={po.intake_id} className={styles.shipmentDocSub}>
                             <div className={styles.shipmentDocSubHeader}>
                               <span className={styles.shipmentDocStatusLabel}>PO {display(po.po_number)}</span>
-                              {canEditShipment && (
+                              {canUploadDocument && (
                                 <label className={styles.shipmentDocUploadLabel}>
                                   <input
                                     type="file"
@@ -3237,7 +3292,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                       <div key={st} className={styles.shipmentDocSub}>
                         <div className={styles.shipmentDocSubHeader}>
                           <span className={styles.shipmentDocStatusLabel}>{st === "DRAFT" ? "Draft" : "Final"}</span>
-                          {canEditShipment && (
+                          {canUploadDocument && (
                             <label className={styles.shipmentDocUploadLabel}>
                               <input
                                 type="file"
@@ -3265,7 +3320,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                 <div className={styles.shipmentDocSub}>
                   <div className={styles.shipmentDocSubHeader}>
                     <span className={styles.shipmentDocStatusLabel}>Files</span>
-                    {canEditShipment && (
+                    {canUploadDocument && (
                       <label className={styles.shipmentDocUploadLabel}>
                         <input
                           type="file"
@@ -3304,7 +3359,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         </>
       )}
 
-      {coupleModal && (
+      {coupleModal && canCoupleDecouplePo && (
         <div
           className={styles.modalOverlay}
           onClick={() => {

@@ -28,6 +28,7 @@ function buildQueryString(query: ListShipmentsQuery): string {
   if (query.to_date) params.set("to_date", query.to_date);
   if (query.po_from_date) params.set("po_from_date", query.po_from_date);
   if (query.po_to_date) params.set("po_to_date", query.po_to_date);
+  if (query.active_pipeline) params.set("active_pipeline", "true");
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

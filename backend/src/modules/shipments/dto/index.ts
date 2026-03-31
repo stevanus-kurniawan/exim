@@ -110,6 +110,11 @@ export interface ListShipmentsQuery {
   po_from_date?: string;
   /** Inclusive; same semantics as `po_from_date` for upper bound. */
   po_to_date?: string;
+  /**
+   * When true (e.g. `active_pipeline=true`), only shipments that are still open for operations:
+   * `closed_at IS NULL` and `current_status <> 'DELIVERED'`.
+   */
+  active_pipeline?: boolean;
 }
 
 /** Line summary for shipment list PO expansion. */
@@ -129,6 +134,9 @@ export interface ShipmentListLinkedPo {
   pt: string | null;
   plant: string | null;
   taken_by_name: string | null;
+  /** PO intake currency — same grouping key as couple validation. */
+  currency: string | null;
+  intake_status: string | null;
   items: ShipmentListPoLineItem[];
 }
 
@@ -212,6 +220,8 @@ export interface ShipmentListItem {
   /** PT / plant shown on the row: first linked PO when multiple may differ. */
   display_pt: string | null;
   display_plant: string | null;
+  /** When set, shipment is closed — cannot couple additional POs. */
+  closed_at: string | null;
   linked_pos: ShipmentListLinkedPo[];
 }
 

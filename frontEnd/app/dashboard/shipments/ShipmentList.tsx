@@ -66,10 +66,15 @@ function formatLineQty(q: number | string | null | undefined): string {
 }
 
 function normalizeListRow(row: ShipmentListItem): ShipmentListItem {
-  const linked = row.linked_pos ?? [];
+  const linked = (row.linked_pos ?? []).map((p) => ({
+    ...p,
+    currency: p.currency ?? null,
+    intake_status: p.intake_status ?? null,
+  }));
   const linked_po_count = row.linked_po_count ?? linked.length;
   return {
     ...row,
+    closed_at: row.closed_at ?? null,
     linked_pos: linked,
     linked_po_count,
     incoterm: row.incoterm ?? null,

@@ -85,6 +85,7 @@ function toListItem(row: ShipmentRow, linkedPos: ShipmentListLinkedPo[]): Shipme
     pic_name: pic,
     display_pt: first?.pt ?? null,
     display_plant: first?.plant ?? null,
+    closed_at: row.closed_at ? row.closed_at.toISOString() : null,
     linked_pos: linkedPos,
   };
 }
