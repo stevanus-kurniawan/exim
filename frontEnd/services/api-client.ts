@@ -6,6 +6,22 @@
 import { config } from "@/lib/config";
 import type { ApiResponse, ApiError } from "@/types/api";
 
+/**
+ * Client: relative `/api/backend/...` is fine. Server (RSC / SSR): must be absolute; defaults to this Next process.
+ */
+function resolveRequestUrl(path: string): string {
+  if (path.startsWith("http")) return path;
+  const base = config.apiBaseUrl.replace(/\/$/, "");
+  const suffix = path.replace(/^\//, "");
+  const rel = `${base}/${suffix}`;
+  if (typeof window !== "undefined") {
+    return rel.startsWith("/") ? rel : `/${rel}`;
+  }
+  if (base.startsWith("http")) return rel;
+  const origin = process.env.INTERNAL_NEXT_ORIGIN?.trim() || "http://127.0.0.1:3000";
+  return `${origin.replace(/\/$/, "")}${rel.startsWith("/") ? rel : `/${rel}`}`;
+}
+
 export interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
   /** If provided, access token is sent as Bearer. */
@@ -34,7 +50,7 @@ export async function apiRequest<T>(
   options: RequestOptions = {}
 ): Promise<ApiResponse<T>> {
   const { accessToken, body, ...init } = options;
-  const url = path.startsWith("http") ? path : `${config.apiBaseUrl.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+  const url = resolveRequestUrl(path);
   const customHeaders =
     init.headers && typeof init.headers === "object" && !Array.isArray(init.headers) && !(init.headers instanceof Headers)
       ? (init.headers as Record<string, string>)
