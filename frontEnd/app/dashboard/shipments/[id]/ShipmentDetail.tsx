@@ -46,7 +46,12 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { DutyFormulaInfoIcon } from "@/components/icons/DutyFormulaInfoIcon";
 import { ActivityLogRibbonIcon } from "@/components/icons/ActivityLogRibbonIcon";
 import { statusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
-import { formatDecimal, formatPriceInputWithCommas, stripCommaThousands } from "@/lib/format-number";
+import {
+  formatDecimal,
+  formatPriceInputWithCommas,
+  roundTo2Decimals,
+  stripCommaThousands,
+} from "@/lib/format-number";
 import {
   formatPoLineQtyDisplay,
   parseDeliveredQtyInput,
@@ -764,7 +769,10 @@ export function ShipmentDetail({ id }: { id: string }) {
     );
     setEditIncotermAmount(
       detail.incoterm_amount != null
-        ? formatPriceInputWithCommas(String(detail.incoterm_amount).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(
+            roundTo2Decimals(Number(detail.incoterm_amount)).toFixed(2),
+            2
+          )
         : ""
     );
     setEditCbm(detail.cbm != null ? String(detail.cbm) : "");
@@ -772,17 +780,17 @@ export function ShipmentDetail({ id }: { id: string }) {
     setEditGrossWeightMt(detail.gross_weight_mt != null ? String(detail.gross_weight_mt) : "");
     setEditBmPercentage(
       detail.bm_percentage != null
-        ? formatPriceInputWithCommas(String(detail.bm_percentage).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.bm_percentage)).toFixed(2), 2)
         : ""
     );
     setEditPpnPercentage(
       detail.ppn_percentage != null
-        ? formatPriceInputWithCommas(String(detail.ppn_percentage).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.ppn_percentage)).toFixed(2), 2)
         : ""
     );
     setEditPphPercentage(
       detail.pph_percentage != null
-        ? formatPriceInputWithCommas(String(detail.pph_percentage).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.pph_percentage)).toFixed(2), 2)
         : ""
     );
     setEditClosedAt(detail.closed_at ? detail.closed_at.slice(0, 10) : "");
@@ -934,7 +942,10 @@ export function ShipmentDetail({ id }: { id: string }) {
       id,
       {
         forwarder_name: bidForwarder.trim(),
-        service_amount: parseCommaFormattedDecimal(bidServiceAmount),
+        service_amount: (() => {
+          const n = parseCommaFormattedDecimal(bidServiceAmount);
+          return n != null ? roundTo2Decimals(n) : undefined;
+        })(),
         quotation_expires_at: bidQuotationExpiresAt.trim() || undefined,
         origin_port: lanePort || undefined,
         destination_port: bidDestinationPort.trim() || undefined,
@@ -990,7 +1001,7 @@ export function ShipmentDetail({ id }: { id: string }) {
     setEditBidForwarder(bid.forwarder_name);
     setEditBidServiceAmount(
       bid.service_amount != null
-        ? formatPriceInputWithCommas(String(bid.service_amount).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(bid.service_amount)).toFixed(2), 2)
         : ""
     );
     setEditBidQuotationExpiresAt(bid.quotation_expires_at?.trim().slice(0, 10) ?? "");
@@ -1013,7 +1024,11 @@ export function ShipmentDetail({ id }: { id: string }) {
       editingBidId,
       {
         forwarder_name: editBidForwarder.trim(),
-        service_amount: editBidServiceAmount.trim() ? parseCommaFormattedDecimal(editBidServiceAmount) : undefined,
+        service_amount: (() => {
+          if (!editBidServiceAmount.trim()) return undefined;
+          const n = parseCommaFormattedDecimal(editBidServiceAmount);
+          return n != null ? roundTo2Decimals(n) : undefined;
+        })(),
         quotation_expires_at: editBidQuotationExpiresAt.trim() || null,
         origin_port: lanePort || undefined,
         destination_port: editBidDestinationPort.trim() || undefined,
@@ -1369,7 +1384,7 @@ export function ShipmentDetail({ id }: { id: string }) {
       editSurveyor === "Yes" || editSurveyor === "No" ? editSurveyor : detail.surveyor;
 
     const incotermAmtFromEdit = editIncotermAmount.trim()
-      ? Number(stripCommaThousands(editIncotermAmount.trim()))
+      ? roundTo2Decimals(Number(stripCommaThousands(editIncotermAmount.trim())))
       : null;
     const incoterm_amount =
       incotermAmtFromEdit != null && Number.isFinite(incotermAmtFromEdit)
@@ -1377,7 +1392,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         : detail.incoterm_amount;
 
     const bmFromEdit = editBmPercentage.trim()
-      ? Number(stripCommaThousands(editBmPercentage.trim()))
+      ? roundTo2Decimals(Number(stripCommaThousands(editBmPercentage.trim())))
       : null;
     const bm_percentage =
       bmFromEdit != null && Number.isFinite(bmFromEdit) ? bmFromEdit : detail.bm_percentage;
@@ -1391,7 +1406,9 @@ export function ShipmentDetail({ id }: { id: string }) {
         .find((s) => s.length > 0);
       const parsedSharedRate = rateRawFromAnyPo ? Number(rateRawFromAnyPo) : NaN;
       const sharedNonIdrRate =
-        Number.isFinite(parsedSharedRate) && parsedSharedRate > 0 ? parsedSharedRate : undefined;
+        Number.isFinite(parsedSharedRate) && parsedSharedRate > 0
+          ? roundTo2Decimals(parsedSharedRate)
+          : undefined;
 
       return base.map((po) => {
         const pd = poDetailsCache[po.intake_id];
@@ -1752,7 +1769,7 @@ export function ShipmentDetail({ id }: { id: string }) {
     const sharedRateSource = d.linked_pos.find((po) => po.currency_rate != null)?.currency_rate;
     const sharedRate =
       sharedRateSource != null
-        ? formatPriceInputWithCommas(String(sharedRateSource).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(sharedRateSource)).toFixed(2), 2)
         : "";
     d.linked_pos.forEach((po) => {
       inv[po.intake_id] = sharedInvoice;
@@ -1822,7 +1839,7 @@ export function ShipmentDetail({ id }: { id: string }) {
       if (isIdr) {
         currencyRateForApi = null;
       } else if (Number.isFinite(parsedRate) && (parsedRate ?? 0) > 0) {
-        currencyRateForApi = parsedRate;
+        currencyRateForApi = roundTo2Decimals(parsedRate as number);
       } else {
         currencyRateForApi = undefined;
       }
@@ -2099,7 +2116,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         editDepo === "yes" ? editDepoLocation.trim() || null : editDepo === "no" ? null : undefined,
       ...unitFields,
       incoterm_amount: editIncotermAmount.trim()
-        ? Number(stripCommaThousands(editIncotermAmount.trim()))
+        ? roundTo2Decimals(Number(stripCommaThousands(editIncotermAmount.trim())))
         : undefined,
       cbm:
         !sea || editShipBy.trim() !== "LCL"
@@ -2112,17 +2129,17 @@ export function ShipmentDetail({ id }: { id: string }) {
       bm_percentage:
         isPibTypeBc23(editPibType.trim() || detail.pib_type) || !editBmPercentage.trim()
           ? undefined
-          : Number(stripCommaThousands(editBmPercentage.trim())),
+          : roundTo2Decimals(Number(stripCommaThousands(editBmPercentage.trim()))),
       ppn_percentage: isPibTypeBc23(editPibType.trim() || detail.pib_type)
         ? undefined
         : !editPpnPercentage.trim()
           ? null
-          : Number(stripCommaThousands(editPpnPercentage.trim())),
+          : roundTo2Decimals(Number(stripCommaThousands(editPpnPercentage.trim()))),
       pph_percentage: isPibTypeBc23(editPibType.trim() || detail.pib_type)
         ? undefined
         : !editPphPercentage.trim()
           ? null
-          : Number(stripCommaThousands(editPphPercentage.trim())),
+          : roundTo2Decimals(Number(stripCommaThousands(editPphPercentage.trim()))),
       closed_at: editClosedAt.trim() || undefined,
     };
     try {
@@ -2423,7 +2440,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                         autoComplete="off"
                         className={styles.input}
                         value={bidServiceAmount}
-                        onChange={(e) => setBidServiceAmount(formatPriceInputWithCommas(e.target.value))}
+                        onChange={(e) => setBidServiceAmount(formatPriceInputWithCommas(e.target.value, 2))}
                         placeholder="1,234.56"
                         aria-label="Service amount"
                       />
@@ -2499,7 +2516,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                                 autoComplete="off"
                                 className={styles.input}
                                 value={editBidServiceAmount}
-                                onChange={(e) => setEditBidServiceAmount(formatPriceInputWithCommas(e.target.value))}
+                                onChange={(e) => setEditBidServiceAmount(formatPriceInputWithCommas(e.target.value, 2))}
                                 placeholder="1,234.56"
                                 aria-label="Service amount"
                               />
@@ -3217,7 +3234,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                 autoComplete="off"
                 className={styles.input}
                 value={editIncotermAmount}
-                onChange={(e) => setEditIncotermAmount(formatPriceInputWithCommas(e.target.value))}
+                onChange={(e) => setEditIncotermAmount(formatPriceInputWithCommas(e.target.value, 2))}
                 placeholder="1,234.56"
                 aria-label="Freight charges amount"
               />
@@ -3326,7 +3343,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                       className={styles.input}
                       value={primaryGroupedPo ? poEditCurrencyRateByIntake[primaryGroupedPo.intake_id] ?? "" : ""}
                       onChange={(e) => {
-                        const next = formatPriceInputWithCommas(e.target.value);
+                        const next = formatPriceInputWithCommas(e.target.value, 2);
                         setPoEditCurrencyRateByIntake(
                           Object.fromEntries(detail.linked_pos.map((po) => [po.intake_id, next] as const))
                         );
@@ -3361,7 +3378,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                 autoComplete="off"
                 className={styles.input}
                 value={editBmPercentage}
-                onChange={(e) => setEditBmPercentage(formatPriceInputWithCommas(e.target.value))}
+                onChange={(e) => setEditBmPercentage(formatPriceInputWithCommas(e.target.value, 2))}
                 placeholder={dutyCalculationSkipped ? "N/A for BC 2.3" : "e.g. 7.5"}
                 aria-label="BM percentage"
                 disabled={dutyCalculationSkipped}
@@ -3381,7 +3398,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                 autoComplete="off"
                 className={styles.input}
                 value={editPpnPercentage}
-                onChange={(e) => setEditPpnPercentage(formatPriceInputWithCommas(e.target.value))}
+                onChange={(e) => setEditPpnPercentage(formatPriceInputWithCommas(e.target.value, 2))}
                 placeholder={
                   dutyCalculationSkipped
                     ? "N/A for BC 2.3"
@@ -3409,7 +3426,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                 autoComplete="off"
                 className={styles.input}
                 value={editPphPercentage}
-                onChange={(e) => setEditPphPercentage(formatPriceInputWithCommas(e.target.value))}
+                onChange={(e) => setEditPphPercentage(formatPriceInputWithCommas(e.target.value, 2))}
                 placeholder={
                   dutyCalculationSkipped
                     ? "N/A for BC 2.3"
