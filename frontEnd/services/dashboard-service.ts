@@ -6,10 +6,7 @@ import { listPo } from "./po-service";
 import { listShipments } from "./shipments-service";
 import { apiGet } from "./api-client";
 import type { ApiResponse } from "@/types/api";
-import type {
-  ProductSpecificationSummaryItem,
-  ProductSpecificationSummaryQuery,
-} from "@/types/dashboard";
+import type { DeliveredManagementItem, DeliveredManagementQuery } from "@/types/dashboard";
 
 /** Counts for dashboard: new PO detected (NEW_PO_DETECTED), claimed awaiting allocation (CLAIMED). Rejects if API errors. */
 export async function getPoDashboardCounts(accessToken: string | null): Promise<{
@@ -54,16 +51,16 @@ export async function getShipmentDashboardCounts(accessToken: string | null): Pr
   return { activeShipments, customsClearance, delivered };
 }
 
-export async function getProductSpecificationSummary(
-  query: ProductSpecificationSummaryQuery,
+export async function getDeliveredManagementSummary(
+  query: DeliveredManagementQuery,
   accessToken: string | null
-): Promise<ApiResponse<ProductSpecificationSummaryItem[]>> {
+): Promise<ApiResponse<DeliveredManagementItem[]>> {
   const params = new URLSearchParams();
   if (query.month != null) params.set("month", String(query.month));
   if (query.year != null) params.set("year", String(query.year));
   const qs = params.toString();
-  return apiGet<ProductSpecificationSummaryItem[]>(
-    `dashboard/product-specification-summary${qs ? `?${qs}` : ""}`,
+  return apiGet<DeliveredManagementItem[]>(
+    `dashboard/delivered-management${qs ? `?${qs}` : ""}`,
     accessToken
   );
 }

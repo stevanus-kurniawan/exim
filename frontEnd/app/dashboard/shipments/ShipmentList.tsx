@@ -22,6 +22,7 @@ import {
 import { Badge } from "@/components/badges";
 import { isApiError } from "@/types/api";
 import { displayPibTypeLabel } from "@/lib/pib-type-label";
+import { displayProductClassification } from "@/lib/product-classification";
 import { formatStatusLabel, statusToBadgeVariant } from "@/lib/status-badge";
 import type { ShipmentListItem, ShipmentListLinkedPo } from "@/types/shipments";
 import { formatDayMonthYear } from "@/lib/format-date";
@@ -212,7 +213,7 @@ export function ShipmentList() {
       case "ship_via":
         return [row.shipment_method ?? ""];
       case "product_classification":
-        return [row.product_classification ?? ""];
+        return [displayProductClassification(row.product_classification)];
       case "ship_by":
         return [row.ship_by ?? ""];
       case "pic":
@@ -325,7 +326,7 @@ export function ShipmentList() {
       case "ship_via":
         return <TableCell key={column.id}>{row.shipment_method?.trim() || "—"}</TableCell>;
       case "product_classification":
-        return <TableCell key={column.id}>{row.product_classification?.trim() || "—"}</TableCell>;
+        return <TableCell key={column.id}>{displayProductClassification(row.product_classification)}</TableCell>;
       case "ship_by":
         return <TableCell key={column.id}>{row.ship_by?.trim() || "—"}</TableCell>;
       case "pic":

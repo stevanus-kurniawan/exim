@@ -7,8 +7,15 @@ import * as dashboardController from "./controllers/dashboard.controller.js";
 export const dashboardRoutes = Router();
 
 dashboardRoutes.get(
+  "/delivered-management",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  dashboardController.getDeliveredManagementSummary
+);
+/** @deprecated Use GET /dashboard/delivered-management — same response shape. */
+dashboardRoutes.get(
   "/product-specification-summary",
   authMiddleware,
   requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
-  dashboardController.getProductSpecificationSummary
+  dashboardController.getDeliveredManagementSummary
 );

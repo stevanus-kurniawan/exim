@@ -11,7 +11,7 @@ function parseIntegerQuery(value: unknown): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-export async function getProductSpecificationSummary(
+export async function getDeliveredManagementSummary(
   req: Request,
   res: Response,
   next: NextFunction
@@ -35,7 +35,7 @@ export async function getProductSpecificationSummary(
   }
 
   try {
-    const items = await service.getProductSpecificationSummary({ month, year });
+    const items = await service.getDeliveredManagementSummary({ month, year });
     sendSuccess(res, items);
   } catch (error) {
     next(error);

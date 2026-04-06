@@ -14,6 +14,7 @@ export const INTAKE_STATUSES = [
 export type IntakeStatus = (typeof INTAKE_STATUSES)[number];
 
 export interface PoIntakeItemDto {
+  line_number?: number;
   item_description?: string;
   qty?: number;
   unit?: string;
@@ -32,7 +33,8 @@ export interface CreatePoIntakeDto {
   incoterm_location?: string;
   kawasan_berikat?: string;
   currency?: string;
-  items?: PoIntakeItemDto[];
+  /** At least one line required (validated in create-intake.validator). */
+  items: PoIntakeItemDto[];
 }
 
 /** List query. */
@@ -154,4 +156,32 @@ export interface CreatePoIntakeResponse {
   po_number: string;
   intake_status: string;
   created_at: string;
+}
+
+export interface PoCsvImportErrorRow {
+  row: number;
+  field: string;
+  po_number: string;
+  message: string;
+}
+
+export interface PoCsvImportResult {
+  total_rows: number;
+  imported_pos: number;
+  imported_rows: number;
+  failed_rows: number;
+  errors: PoCsvImportErrorRow[];
+}
+
+export interface PoImportHistoryRow {
+  id: string;
+  file_name: string | null;
+  uploaded_by: string;
+  total_rows: number;
+  imported_pos: number;
+  imported_rows: number;
+  failed_rows: number;
+  status: string;
+  created_at: Date;
+  finished_at: Date | null;
 }

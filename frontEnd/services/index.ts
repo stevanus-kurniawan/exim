@@ -11,7 +11,7 @@ export { login, logout, refresh, getMe } from "./auth-service";
 export {
   getPoDashboardCounts,
   getShipmentDashboardCounts,
-  getProductSpecificationSummary,
+  getDeliveredManagementSummary,
 } from "./dashboard-service";
 export {
   listPo,

@@ -7,6 +7,7 @@ import { getPool } from "../../../db/index.js";
 import type {
   CreatePoIntakeDto,
   ListPoIntakeQuery,
+  PoImportHistoryRow,
   PoIntakeRow,
   PoIntakeItemRow,
 } from "../dto/index.js";
@@ -81,7 +82,7 @@ export class PoIntakeRepository {
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           intakeId,
-          i + 1,
+          it?.line_number ?? i + 1,
           it?.item_description ?? null,
           qty,
           it?.unit ?? null,
@@ -219,5 +220,42 @@ export class PoIntakeRepository {
       [userId, id]
     );
     return result.rows[0] ?? null;
+  }
+
+  async createImportHistory(input: {
+    fileName: string | null;
+    uploadedBy: string;
+    totalRows: number;
+    importedPos: number;
+    importedRows: number;
+    failedRows: number;
+    status: "SUCCESS" | "PARTIAL" | "FAILED";
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO po_intake_import_history
+       (file_name, uploaded_by, total_rows, imported_pos, imported_rows, failed_rows, status, created_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+      [
+        input.fileName,
+        input.uploadedBy,
+        input.totalRows,
+        input.importedPos,
+        input.importedRows,
+        input.failedRows,
+        input.status,
+      ]
+    );
+  }
+
+  async listImportHistory(limit = 20): Promise<PoImportHistoryRow[]> {
+    const safeLimit = Math.min(100, Math.max(1, limit));
+    const result = await this.pool.query<PoImportHistoryRow>(
+      `SELECT id, file_name, uploaded_by, total_rows, imported_pos, imported_rows, failed_rows, status, created_at, finished_at
+       FROM po_intake_import_history
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [safeLimit]
+    );
+    return result.rows;
   }
 }

@@ -10,6 +10,9 @@ import { AppError } from "../../../middlewares/errorHandler.js";
 import { syncPoIntakeStatus } from "./po-intake-status-sync.service.js";
 import type {
   CreatePoIntakeDto,
+  PoCsvImportErrorRow,
+  PoCsvImportResult,
+  PoImportHistoryRow,
   ListPoIntakeQuery,
   PoIntakeRow,
   PoIntakeItemRow,
@@ -17,6 +20,49 @@ import type {
   PoIntakeDetail,
   CreatePoIntakeResponse,
 } from "../dto/index.js";
+
+type ImportCsvRow = {
+  row: number;
+  po_number: string;
+  supplier_name: string;
+  line_number: number;
+  qty: number;
+  item_description?: string;
+  unit?: string;
+  unit_price?: number;
+  plant?: string;
+  pt?: string;
+  delivery_location?: string;
+  incoterm_location?: string;
+  kawasan_berikat?: "Yes" | "No";
+  currency?: string;
+};
+
+type GroupHeader = {
+  supplier_name: string;
+  plant?: string;
+  pt?: string;
+  delivery_location?: string;
+  incoterm_location?: string;
+  kawasan_berikat?: "Yes" | "No";
+  currency?: string;
+};
+
+const MONITORING_CSV_HEADERS = [
+  "po_number",
+  "supplier_name",
+  "line_number",
+  "item_description",
+  "qty",
+  "unit",
+  "unit_price",
+  "plant",
+  "pt",
+  "delivery_location",
+  "incoterm_location",
+  "kawasan_berikat",
+  "currency",
+] as const;
 
 function toListItem(row: PoIntakeRow & { taken_by_name?: string | null }): PoIntakeListItem {
   return {
@@ -37,6 +83,57 @@ function toListItem(row: PoIntakeRow & { taken_by_name?: string | null }): PoInt
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
+}
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = "";
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (c === '"') {
+      inQuote = !inQuote;
+      continue;
+    }
+    if (!inQuote && c === ",") {
+      result.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+function normalizeOpt(raw: string): string | undefined {
+  const t = raw.trim();
+  return t.length > 0 ? t : undefined;
+}
+
+function parseRequiredNumber(raw: string, field: string, row: number, poNumber: string, errors: PoCsvImportErrorRow[]): number | null {
+  const t = raw.trim();
+  if (!t) {
+    errors.push({ row, field, po_number: poNumber, message: `${field} is required` });
+    return null;
+  }
+  const n = Number(t);
+  if (!Number.isFinite(n)) {
+    errors.push({ row, field, po_number: poNumber, message: `${field} must be a valid number` });
+    return null;
+  }
+  return n;
+}
+
+async function generateExternalId(repo: PoIntakeRepository, poNumber: string): Promise<string> {
+  const base = `CSV-${poNumber.trim().toUpperCase().replace(/\s+/g, "-")}`;
+  let candidate = base;
+  let seq = 1;
+  while (await repo.existsByExternalId(candidate)) {
+    seq += 1;
+    candidate = `${base}-${seq}`;
+  }
+  return candidate;
 }
 
 async function buildDetail(
@@ -146,6 +243,246 @@ export class PoIntakeService {
       intake_status: row.intake_status,
       created_at: row.created_at.toISOString(),
     };
+  }
+
+  getImportTemplateCsv(): string {
+    return `${MONITORING_CSV_HEADERS.join(",")}
+PO-0001,PT Supplier A,1,Caustic Soda Flakes,100,MT,1250.5,Plant A,PT EOS,Warehouse Merak,FOB Shanghai,Yes,USD
+PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,FOB Shanghai,Yes,USD
+`;
+  }
+
+  async importFromCsv(csvText: string, actorName: string, fileName: string | null): Promise<PoCsvImportResult> {
+    const lines = csvText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    if (lines.length < 2) {
+      throw new AppError("CSV must include a header row and at least one data row", 400);
+    }
+
+    const header = parseCsvLine(lines[0]!).map((h) => h.toLowerCase());
+    const missingHeaders = MONITORING_CSV_HEADERS.filter((h) => !header.includes(h));
+    if (missingHeaders.length > 0) {
+      throw new AppError(`Missing required CSV header(s): ${missingHeaders.join(", ")}`, 400);
+    }
+
+    const idx = (key: (typeof MONITORING_CSV_HEADERS)[number]) => header.indexOf(key);
+    const errors: PoCsvImportErrorRow[] = [];
+    const rows: ImportCsvRow[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const rowNumber = i + 1;
+      const cells = parseCsvLine(lines[i]!);
+      const poNumber = (cells[idx("po_number")] ?? "").trim();
+      const supplierName = (cells[idx("supplier_name")] ?? "").trim();
+
+      if (!poNumber) {
+        errors.push({ row: rowNumber, field: "po_number", po_number: "", message: "po_number is required" });
+      }
+      if (!supplierName) {
+        errors.push({ row: rowNumber, field: "supplier_name", po_number: poNumber, message: "supplier_name is required" });
+      }
+
+      const lineNumberRaw = parseRequiredNumber(cells[idx("line_number")] ?? "", "line_number", rowNumber, poNumber, errors);
+      const qtyRaw = parseRequiredNumber(cells[idx("qty")] ?? "", "qty", rowNumber, poNumber, errors);
+      const unitPriceText = (cells[idx("unit_price")] ?? "").trim();
+      const unitPrice = unitPriceText === "" ? undefined : Number(unitPriceText);
+      if (unitPriceText !== "" && (!Number.isFinite(unitPrice) || (unitPrice ?? 0) < 0)) {
+        errors.push({ row: rowNumber, field: "unit_price", po_number: poNumber, message: "unit_price must be a non-negative number" });
+      }
+      const kawasanText = (cells[idx("kawasan_berikat")] ?? "").trim();
+      const kawasan = kawasanText === "" ? undefined : (/^yes$/i.test(kawasanText) ? "Yes" : /^no$/i.test(kawasanText) ? "No" : undefined);
+      if (kawasanText !== "" && !kawasan) {
+        errors.push({
+          row: rowNumber,
+          field: "kawasan_berikat",
+          po_number: poNumber,
+          message: "kawasan_berikat must be Yes or No",
+        });
+      }
+
+      if (lineNumberRaw != null && (!Number.isInteger(lineNumberRaw) || lineNumberRaw < 1)) {
+        errors.push({ row: rowNumber, field: "line_number", po_number: poNumber, message: "line_number must be an integer >= 1" });
+      }
+      if (qtyRaw != null && qtyRaw < 0) {
+        errors.push({ row: rowNumber, field: "qty", po_number: poNumber, message: "qty must be a non-negative number" });
+      }
+      if (!poNumber || !supplierName || lineNumberRaw == null || qtyRaw == null) continue;
+      if (!Number.isInteger(lineNumberRaw) || lineNumberRaw < 1 || qtyRaw < 0) continue;
+
+      rows.push({
+        row: rowNumber,
+        po_number: poNumber,
+        supplier_name: supplierName,
+        line_number: lineNumberRaw,
+        qty: qtyRaw,
+        item_description: normalizeOpt(cells[idx("item_description")] ?? ""),
+        unit: normalizeOpt(cells[idx("unit")] ?? ""),
+        unit_price: unitPrice,
+        plant: normalizeOpt(cells[idx("plant")] ?? ""),
+        pt: normalizeOpt(cells[idx("pt")] ?? ""),
+        delivery_location: normalizeOpt(cells[idx("delivery_location")] ?? ""),
+        incoterm_location: normalizeOpt(cells[idx("incoterm_location")] ?? ""),
+        kawasan_berikat: kawasan,
+        currency: normalizeOpt((cells[idx("currency")] ?? "").toUpperCase()),
+      });
+    }
+
+    const byPo = new Map<string, ImportCsvRow[]>();
+    for (const row of rows) {
+      const key = row.po_number.trim().toLowerCase();
+      const arr = byPo.get(key) ?? [];
+      arr.push(row);
+      byPo.set(key, arr);
+    }
+
+    let importedPos = 0;
+    let importedRows = 0;
+    for (const [, poRows] of byPo) {
+      const sample = poRows[0]!;
+      const duplicatedLine = new Set<number>();
+      const seenLine = new Set<number>();
+      for (const r of poRows) {
+        if (seenLine.has(r.line_number)) duplicatedLine.add(r.line_number);
+        seenLine.add(r.line_number);
+      }
+      if (duplicatedLine.size > 0) {
+        for (const r of poRows) {
+          if (duplicatedLine.has(r.line_number)) {
+            errors.push({
+              row: r.row,
+              field: "line_number",
+              po_number: r.po_number,
+              message: `Duplicate line_number ${r.line_number} in the same PO group`,
+            });
+          }
+        }
+        continue;
+      }
+
+      const headerCheck: GroupHeader = {
+        supplier_name: sample.supplier_name,
+        plant: sample.plant,
+        pt: sample.pt,
+        delivery_location: sample.delivery_location,
+        incoterm_location: sample.incoterm_location,
+        kawasan_berikat: sample.kawasan_berikat,
+        currency: sample.currency,
+      };
+      const inconsistent = poRows.some(
+        (r) =>
+          r.supplier_name !== headerCheck.supplier_name ||
+          (r.plant ?? null) !== (headerCheck.plant ?? null) ||
+          (r.pt ?? null) !== (headerCheck.pt ?? null) ||
+          (r.delivery_location ?? null) !== (headerCheck.delivery_location ?? null) ||
+          (r.incoterm_location ?? null) !== (headerCheck.incoterm_location ?? null) ||
+          (r.kawasan_berikat ?? null) !== (headerCheck.kawasan_berikat ?? null) ||
+          (r.currency ?? null) !== (headerCheck.currency ?? null)
+      );
+      if (inconsistent) {
+        for (const r of poRows) {
+          errors.push({
+            row: r.row,
+            field: "po_group",
+            po_number: r.po_number,
+            message: "Rows with the same po_number must share identical header values",
+          });
+        }
+        continue;
+      }
+
+      if (await this.repo.existsByPoNumberTrimmed(sample.po_number)) {
+        for (const r of poRows) {
+          errors.push({
+            row: r.row,
+            field: "po_number",
+            po_number: r.po_number,
+            message: "Purchase Order number already exists",
+          });
+        }
+        continue;
+      }
+
+      try {
+        const externalId = await generateExternalId(this.repo, sample.po_number);
+        await this.create({
+          external_id: externalId,
+          po_number: sample.po_number,
+          supplier_name: sample.supplier_name,
+          plant: sample.plant,
+          pt: sample.pt,
+          delivery_location: sample.delivery_location,
+          incoterm_location: sample.incoterm_location,
+          kawasan_berikat: sample.kawasan_berikat,
+          currency: sample.currency,
+          items: poRows.map((r) => ({
+            line_number: r.line_number,
+            item_description: r.item_description,
+            qty: r.qty,
+            unit: r.unit,
+            value: r.unit_price,
+          })),
+        });
+        importedPos += 1;
+        importedRows += poRows.length;
+      } catch (e) {
+        const message = e instanceof AppError ? e.message : "Failed to import PO";
+        for (const r of poRows) {
+          errors.push({ row: r.row, field: "po_import", po_number: r.po_number, message });
+        }
+      }
+    }
+
+    const result: PoCsvImportResult = {
+      total_rows: lines.length - 1,
+      imported_pos: importedPos,
+      imported_rows: importedRows,
+      failed_rows: (lines.length - 1) - importedRows,
+      errors: errors.sort((a, b) => a.row - b.row),
+    };
+
+    const status = result.imported_rows === 0 ? "FAILED" : result.errors.length > 0 ? "PARTIAL" : "SUCCESS";
+    await this.repo.createImportHistory({
+      fileName,
+      uploadedBy: actorName,
+      totalRows: result.total_rows,
+      importedPos: result.imported_pos,
+      importedRows: result.imported_rows,
+      failedRows: result.failed_rows,
+      status,
+    });
+
+    return result;
+  }
+
+  async listImportHistory(limit?: number): Promise<
+    Array<{
+      id: string;
+      file_name: string | null;
+      uploaded_by: string;
+      total_rows: number;
+      imported_pos: number;
+      imported_rows: number;
+      failed_rows: number;
+      status: string;
+      created_at: string;
+      finished_at: string | null;
+    }>
+  > {
+    const rows: PoImportHistoryRow[] = await this.repo.listImportHistory(limit);
+    return rows.map((r) => ({
+      id: r.id,
+      file_name: r.file_name,
+      uploaded_by: r.uploaded_by,
+      total_rows: r.total_rows,
+      imported_pos: r.imported_pos,
+      imported_rows: r.imported_rows,
+      failed_rows: r.failed_rows,
+      status: r.status,
+      created_at: r.created_at.toISOString(),
+      finished_at: r.finished_at ? r.finished_at.toISOString() : null,
+    }));
   }
 
   async list(query: ListPoIntakeQuery): Promise<{ items: PoIntakeListItem[]; total: number }> {

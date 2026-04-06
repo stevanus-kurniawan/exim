@@ -10,11 +10,14 @@ import type {
   ShipmentTimelineEntry,
   ShipmentStatusSummaryData,
   ShipmentBid,
+  RecentForwarderBid,
   ShipmentNote,
   ShipmentActivityItem,
   ShipmentDocumentListItem,
+  ShipmentImportCsvResult,
 } from "@/types/shipments";
 import type { ApiResponse } from "@/types/api";
+import { config } from "@/lib/config";
 
 function buildQueryString(query: ListShipmentsQuery): string {
   const params = new URLSearchParams();
@@ -59,17 +62,20 @@ export interface UpdateShipmentPayload {
   remarks?: string;
   pib_type?: string;
   no_request_pib?: string;
+  ppjk_mkl?: string;
   nopen?: string;
   nopen_date?: string;
-  ship_by?: string;
+  ship_by?: string | null;
   bl_awb?: string;
   insurance_no?: string;
   coo?: string;
   incoterm_amount?: number;
-  cbm?: number;
+  cbm?: number | null;
   net_weight_mt?: number;
   gross_weight_mt?: number;
   bm_percentage?: number;
+  ppn_percentage?: number | null;
+  pph_percentage?: number | null;
   origin_port_name?: string;
   origin_port_country?: string;
   forwarder_name?: string;
@@ -171,10 +177,27 @@ export async function listShipmentBids(
   return apiGet<ShipmentBid[]>(`shipments/${shipmentId}/bids`, accessToken);
 }
 
+export async function listRecentShipmentForwarders(
+  shipmentId: string,
+  limit: number,
+  accessToken: string | null,
+  /** Filter lane origin country (optional; defaults to shipment’s saved value). */
+  originPortCountry?: string | null
+): Promise<ApiResponse<RecentForwarderBid[]>> {
+  const q = new URLSearchParams();
+  q.set("limit", String(limit));
+  q.set("shipment_id", shipmentId);
+  const oc = originPortCountry != null ? String(originPortCountry).trim() : "";
+  if (oc) q.set("origin_port_country", oc);
+  return apiGet<RecentForwarderBid[]>(`shipments/bids/recent?${q.toString()}`, accessToken);
+}
+
 export interface CreateShipmentBidPayload {
   forwarder_name: string;
   service_amount?: number;
   duration?: string;
+  /** YYYY-MM-DD; optional. */
+  quotation_expires_at?: string;
   origin_port?: string;
   destination_port?: string;
   ship_via?: string;
@@ -192,6 +215,7 @@ export interface UpdateShipmentBidPayload {
   forwarder_name?: string;
   service_amount?: number;
   duration?: string;
+  quotation_expires_at?: string | null;
   origin_port?: string;
   destination_port?: string;
   ship_via?: string;
@@ -286,5 +310,28 @@ export async function deleteShipmentDocument(
 ): Promise<ApiResponse<{ id: string }>> {
   return apiDelete<{ id: string }>(`shipments/${shipmentId}/documents/${documentId}`, accessToken);
 }
+
+export async function importShipmentCombinedCsv(
+  file: File,
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentImportCsvResult>> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiRequest<ShipmentImportCsvResult>("shipments/import/combined-csv", {
+    method: "POST",
+    body: form,
+    accessToken,
+  });
+}
+
+export async function downloadShipmentCombinedTemplate(accessToken: string | null): Promise<Blob> {
+  const url = `${config.apiBaseUrl}/shipments/import/combined-template-csv`;
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const res = await fetch(url, { method: "GET", headers });
+  if (!res.ok) throw new Error("Failed to download shipment template");
+  return res.blob();
+}
+
 
 

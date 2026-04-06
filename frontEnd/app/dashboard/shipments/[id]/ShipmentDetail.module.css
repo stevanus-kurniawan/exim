@@ -334,7 +334,7 @@
   grid-column: 1 / -1;
 }
 
-/* Invoice / currency / rate per linked PO — Import duties row beside Total PO amount */
+/* Invoice / currency / rate per linked PO — Import duties row beside Total Invoice amount */
 .poArrivalMappingGroup {
   grid-column: 1 / -1;
   display: grid;
@@ -697,6 +697,51 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-3, 16px);
+}
+
+.forwarderLinerPick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2, 8px);
+  width: 100%;
+}
+
+.forwarderLinerPick > * {
+  width: 100%;
+  max-width: 100%;
+}
+
+.recentForwarderCard {
+  margin-bottom: var(--spacing-3, 16px);
+}
+
+.recentForwarderList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2, 8px);
+}
+
+.recentForwarderItem {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  padding: var(--spacing-2, 8px) var(--spacing-3, 16px);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-md, 8px);
+  background: var(--color-primitive-background-default, #fff);
+}
+
+.recentForwarderMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recentForwarderMeta {
+  font-size: var(--typography-fontSize-small, 14px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
 }
 
 .bidCard {

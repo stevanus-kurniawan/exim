@@ -20,7 +20,7 @@ const BASE_NAV: NavItem[] = [
 ];
 
 const MANAGE_USERS = "MANAGE_USERS";
-const VIEW_SHIPMENTS = "VIEW_SHIPMENTS";
+const IMPORT_PO_CSV = "IMPORT_PO_CSV";
 
 const PLACEHOLDER_NAV: NavItem[] = [
   { href: "#", label: "Reports", comingSoon: true },
@@ -72,8 +72,8 @@ export function Sidebar({ isMobileOpen = false, onClose }: SidebarProps) {
 
   const mainNav = useMemo(() => {
     const items = [...BASE_NAV];
-    if (can(user, VIEW_SHIPMENTS)) {
-      items.push({ href: "/dashboard/management", label: "Management" });
+    if (can(user, IMPORT_PO_CSV)) {
+      items.push({ href: "/dashboard/monitoring-data", label: "Monitoring Data" });
     }
     if (can(user, MANAGE_USERS)) {
       items.push({ href: "/dashboard/users", label: "User management" });

@@ -20,6 +20,7 @@ const SHIPMENT_UPDATE_FIELD_LABELS: Record<string, string> = {
   remarks: "Remarks",
   pib_type: "PIB type",
   no_request_pib: "PIB doc no.",
+  ppjk_mkl: "PPJK/MKL",
   product_classification: "Product classification",
   nopen: "NOPEN",
   nopen_date: "NOPEN date",
@@ -30,6 +31,8 @@ const SHIPMENT_UPDATE_FIELD_LABELS: Record<string, string> = {
   incoterm_amount: "Incoterm amount",
   cbm: "CBM",
   bm_percentage: "BM percentage",
+  ppn_percentage: "PPN percentage",
+  pph_percentage: "PPH percentage",
   origin_port_name: "Origin port",
   origin_port_country: "Origin country",
   forwarder_name: "Forwarder",
@@ -184,3 +187,4 @@ export class ShipmentActivityService {
     return { items };
   }
 }
+
