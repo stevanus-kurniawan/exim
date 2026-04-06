@@ -2,9 +2,17 @@
  * PO API — services layer. All PO (imported PO intake) API calls go through here.
  */
 
-import { apiGet, apiPost } from "./api-client";
-import type { PoListItem, PoDetail, ListPoQuery, CreateTestPoPayload } from "@/types/po";
+import { apiGet, apiPost, apiRequest } from "./api-client";
+import type {
+  PoListItem,
+  PoDetail,
+  ListPoQuery,
+  CreateTestPoPayload,
+  PoImportCsvResult,
+  PoImportHistoryItem,
+} from "@/types/po";
 import type { ApiResponse } from "@/types/api";
+import { config } from "@/lib/config";
 
 function buildQueryString(query: ListPoQuery): string {
   const params = new URLSearchParams();
@@ -69,5 +77,37 @@ export async function lookupPoByPoNumber(
 ): Promise<ApiResponse<{ id: string }>> {
   const q = new URLSearchParams({ po_number: poNumber.trim() });
   return apiGet<{ id: string }>(`po/lookup-by-po-number?${q.toString()}`, accessToken);
+}
+
+export async function importPoCsv(
+  file: File,
+  accessToken: string | null
+): Promise<ApiResponse<PoImportCsvResult>> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiRequest<PoImportCsvResult>("po/import/csv", {
+    method: "POST",
+    body: form,
+    accessToken,
+  });
+}
+
+export async function listPoImportHistory(
+  accessToken: string | null,
+  limit = 20
+): Promise<ApiResponse<PoImportHistoryItem[]>> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  return apiGet<PoImportHistoryItem[]>(`po/import/history?${q.toString()}`, accessToken);
+}
+
+export async function downloadPoImportTemplate(accessToken: string | null): Promise<Blob> {
+  const url = `${config.apiBaseUrl}/po/import/template-csv`;
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const res = await fetch(url, { method: "GET", headers });
+  if (!res.ok) {
+    throw new Error("Failed to download template");
+  }
+  return res.blob();
 }
 

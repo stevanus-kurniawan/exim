@@ -107,10 +107,20 @@ export async function takeOwnership(req: Request, res: Response, next: NextFunct
   }
 }
 
+function actorDisplayName(req: Request): string {
+  const name = req.user?.name?.trim();
+  if (name) return name;
+  const email = req.user?.email?.trim();
+  if (email) return email;
+  const idRaw = req.user?.id;
+  if (idRaw != null && String(idRaw).trim() !== "") return String(idRaw).trim();
+  return "System";
+}
+
 /** POST /po/:id/create-shipment — create a new shipment and couple this intake to it. */
 export async function createShipment(req: Request, res: Response, next: NextFunction): Promise<void> {
   const intakeId = req.params.id as string;
-  const userName = req.user?.name ?? "System";
+  const userName = actorDisplayName(req);
   try {
     const intake = await service.getById(intakeId);
     if (!intake) {
@@ -124,7 +134,7 @@ export async function createShipment(req: Request, res: Response, next: NextFunc
       incoterm: intake.incoterm_location ?? undefined,
       kawasan_berikat: intake.kawasan_berikat ?? undefined,
     };
-    const created = await shipmentService.create(createDto);
+    const created = await shipmentService.create(createDto, userName);
     const shipment = await shipmentService.couplePo(created.id, [intakeId], userName);
     sendSuccess(
       res,
@@ -144,7 +154,7 @@ export async function coupleToShipment(req: Request, res: Response, next: NextFu
     sendError(res, "Validation error", { errors: validation.errors, statusCode: 400 });
     return;
   }
-  const userName = req.user?.name ?? "System";
+  const userName = actorDisplayName(req);
   try {
     const intake = await service.getById(intakeId);
     if (!intake) {
@@ -153,6 +163,49 @@ export async function coupleToShipment(req: Request, res: Response, next: NextFu
     }
     const shipment = await shipmentService.couplePo(validation.data.shipment_id, [intakeId], userName);
     sendSuccess(res, shipment ?? {}, { message: "PO coupled to shipment successfully" });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function downloadImportTemplate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const csv = service.getImportTemplateCsv();
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="monitoring-data-template.csv"');
+    res.status(200).send(csv);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function importCsv(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    let csvText = "";
+    const file = req.file as { buffer?: Buffer; originalname?: string } | undefined;
+    if (file?.buffer) csvText = file.buffer.toString("utf8");
+    else if (typeof req.body?.csv_text === "string") csvText = req.body.csv_text;
+    if (!csvText.trim()) {
+      sendError(res, "CSV file is required", { statusCode: 400 });
+      return;
+    }
+    const actorName = req.user?.name ?? req.user?.id ?? "system";
+    const result = await service.importFromCsv(csvText, actorName, file?.originalname ?? null);
+    sendSuccess(res, result, {
+      message: result.errors.length > 0 ? "CSV imported with warnings" : "CSV imported successfully",
+      statusCode: 200,
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listImportHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const rawLimit = Number.parseInt(String(req.query.limit ?? "20"), 10);
+    const limit = Number.isNaN(rawLimit) ? 20 : rawLimit;
+    const rows = await service.listImportHistory(limit);
+    sendSuccess(res, rows);
   } catch (e) {
     next(e);
   }

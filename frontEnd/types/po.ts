@@ -118,3 +118,31 @@ export interface CreateTestPoPayload {
   currency?: string;
   items?: CreateTestPoItem[];
 }
+
+export interface PoImportCsvErrorRow {
+  row: number;
+  field: string;
+  po_number: string;
+  message: string;
+}
+
+export interface PoImportCsvResult {
+  total_rows: number;
+  imported_pos: number;
+  imported_rows: number;
+  failed_rows: number;
+  errors: PoImportCsvErrorRow[];
+}
+
+export interface PoImportHistoryItem {
+  id: string;
+  file_name: string | null;
+  uploaded_by: string;
+  total_rows: number;
+  imported_pos: number;
+  imported_rows: number;
+  failed_rows: number;
+  status: string;
+  created_at: string;
+  finished_at: string | null;
+}

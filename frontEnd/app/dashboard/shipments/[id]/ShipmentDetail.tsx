@@ -17,6 +17,7 @@ import {
   updateShipmentPoMapping,
   updateShipmentPoLines,
   listShipmentBids,
+  listRecentShipmentForwarders,
   createShipmentBid,
   updateShipmentBid,
   deleteShipmentBid,
@@ -45,7 +46,12 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { DutyFormulaInfoIcon } from "@/components/icons/DutyFormulaInfoIcon";
 import { ActivityLogRibbonIcon } from "@/components/icons/ActivityLogRibbonIcon";
 import { statusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
-import { formatDecimal, formatPriceInputWithCommas, stripCommaThousands } from "@/lib/format-number";
+import {
+  formatDecimal,
+  formatPriceInputWithCommas,
+  roundTo2Decimals,
+  stripCommaThousands,
+} from "@/lib/format-number";
 import {
   formatPoLineQtyDisplay,
   parseDeliveredQtyInput,
@@ -60,6 +66,7 @@ import {
   getRequiredFieldsForTransition,
   getFieldLabel,
   getApplicableStatuses,
+  isShipmentMethodSea,
   INCOTERMS_WITH_BIDDING_TRANSPORTER,
 } from "@/lib/shipment-status-requirements";
 import type { TimelineItem as TimelineItemType, TimelineItemVariant } from "@/components/timeline";
@@ -67,6 +74,7 @@ import type {
   ShipmentDetail as ShipmentDetailType,
   ShipmentTimelineEntry,
   ShipmentBid,
+  RecentForwarderBid,
   LinkedPoSummary,
   ShipmentNote,
   ShipmentActivityItem,
@@ -78,52 +86,28 @@ import { getCountryOptions } from "@/lib/countries";
 import { getVisibleShipmentDocumentSlots } from "@/lib/shipment-document-slots";
 import { parseYesNoSelectValue, formatYesNoOrLegacy } from "@/lib/yes-no-field";
 import { can } from "@/lib/permissions";
+import {
+  PRODUCT_CLASSIFICATION_OPTIONS,
+  displayProductClassification,
+  normalizeProductClassificationForEdit,
+} from "@/lib/product-classification";
 import styles from "./ShipmentDetail.module.css";
 import { formatDayMonthYear } from "@/lib/format-date";
+import { displayPibTypeLabel, normalizePibTypeForEdit, isPibTypeBc23 } from "@/lib/pib-type-label";
 
 /** Destination port country is fixed for this product. */
 const DESTINATION_PORT_COUNTRY = "Indonesia";
 
-const PRODUCT_CLASSIFICATION_OPTIONS = ["Chemical", "Package", "Spare Parts"] as const;
+/** Select value: choose a bid/recent row or free-text "Other" for Forwarder / liner. */
+const FORWARDER_LINER_PICK_OTHER = "__forwarder_liner_other__";
 
-/** Normalize legacy / misspelled values stored before the Chemical label fix. */
-const PRODUCT_CLASSIFICATION_LEGACY_TO_CURRENT: Record<string, string> = {
-  Chemical: "Chemical",
-  Checmical: "Chemical",
-  Packaging: "Package",
-};
-
-function normalizeProductClassificationForEdit(value: string | null | undefined): string {
-  const v = value != null ? String(value).trim() : "";
-  if (!v) return "";
-  return PRODUCT_CLASSIFICATION_LEGACY_TO_CURRENT[v] ?? v;
-}
-
-function displayProductClassification(value: string | null | undefined): string {
-  const v = value != null ? String(value).trim() : "";
-  if (!v) return "—";
-  return PRODUCT_CLASSIFICATION_LEGACY_TO_CURRENT[v] ?? v;
-}
-
-/** Legacy `pib_type` values stored before label rename; map to current dropdown values. */
-const PIB_TYPE_LEGACY_TO_CURRENT: Record<string, string> = {
-  "PIB 2.3": "BC 23",
-  "PIB 2.0": "BC 20",
-  "BC 2.3": "BC 23",
-  "BC 2.0": "BC 20",
-  "Consignee Note": "Consignment Note",
-};
-
-function displayPibTypeLabel(stored: string | null | undefined): string {
-  const v = stored != null && String(stored).trim() !== "" ? String(stored).trim() : null;
-  if (!v) return "—";
-  return PIB_TYPE_LEGACY_TO_CURRENT[v] ?? v;
-}
-
-function normalizePibTypeForEdit(stored: string | null | undefined): string {
-  const v = stored != null ? String(stored).trim() : "";
-  if (!v) return "";
-  return PIB_TYPE_LEGACY_TO_CURRENT[v] ?? v;
+function normalizeBidShipViaToShipmentMethod(raw: string | null | undefined): string {
+  const t = (raw ?? "").trim();
+  if (!t) return "";
+  const u = t.toUpperCase();
+  if (u === "SEA") return "Sea";
+  if (u === "AIR") return "Air";
+  return t;
 }
 function docKeyForDocumentType(documentType: string): string | null {
   switch (documentType) {
@@ -157,9 +141,17 @@ const SHIPMENT_STATUSES = [
   "DELIVERED",
 ];
 
-const DUTY_FORMULA_BM = "BM = BM% × Total PO amount.";
+const DUTY_FORMULA_BM = "BM = BM% × Total Invoice amount.";
 
 const DUTY_FORMULA_PDRI = "PDRI = BM + PPN + PPH.";
+
+function effectivePpnPct(d: ShipmentDetailType): number {
+  return d.ppn_percentage ?? d.duty_percentage_defaults?.ppn ?? 11;
+}
+
+function effectivePphPct(d: ShipmentDetailType): number {
+  return d.pph_percentage ?? d.duty_percentage_defaults?.pph ?? 2.5;
+}
 
 function formatDocumentBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -174,7 +166,7 @@ type ShipmentDocIntakeFilter =
 /**
  * Shipment-level docs have no intake_id except legacy packing rows (shown in one Packing List bucket).
  * Commercial Invoice (INVOICE): one bucket; legacy rows may have status DRAFT/FINAL or null.
- * Bill of Lading (BL): single bucket (legacy rows may have status DRAFT/FINAL/null).
+ * Bill of Lading (BL): single bucket (rows may have legacy status DRAFT/FINAL/null).
  */
 function filterShipmentDocumentsBySlot(
   docs: ShipmentDocumentListItem[],
@@ -241,10 +233,15 @@ function resolvePoCurrencyCode(linkedPo: LinkedPoSummary, poDetailLoaded: PoDeta
   return linkedPo.currency?.trim() || null;
 }
 
+function isCurrencyIdr(currency: string | null | undefined): boolean {
+  const c = (currency ?? "").trim().toUpperCase();
+  return c === "IDR" || c === "RP";
+}
+
 function getCurrencySymbol(currency: string | null | undefined): string {
   const c = (currency ?? "").trim().toUpperCase();
   if (c === "USD") return "$";
-  if (c === "IDR") return "Rp ";
+  if (c === "IDR" || c === "RP") return "Rp ";
   if (c === "EUR") return "€";
   if (c === "GBP") return "£";
   if (c === "JPY") return "¥";
@@ -276,22 +273,44 @@ function parseCommaFormattedDecimal(raw: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** First run of digits in stored duration text (e.g. "5 days" → "5"). */
+function localTodayYmd(): string {
+  const n = new Date();
+  const y = n.getFullYear();
+  const mo = String(n.getMonth() + 1).padStart(2, "0");
+  const d = String(n.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${d}`;
+}
+
+/** Legacy: first run of digits in stored duration text (e.g. "5 days" → "5"). */
 function parseDurationDaysDigits(stored: string | null | undefined): string {
   if (stored == null || String(stored).trim() === "") return "";
   const m = String(stored).match(/(\d+)/);
   return m?.[1] ?? "";
 }
 
-function formatDurationForApi(daysDigits: string): string | undefined {
-  const t = daysDigits.trim();
-  if (t === "") return undefined;
-  return `${t} days`;
-}
-
-function formatDurationDaysDisplay(stored: string | null | undefined): string {
-  const d = parseDurationDaysDigits(stored);
-  return d ? `${d} days` : "—";
+function getForwarderQuotationExpiryMeta(
+  quotationExpiresAtYmd: string | null | undefined,
+  duration: string | null | undefined,
+  updatedAtIso: string
+): { expiresAt: Date | null; isValidNow: boolean } {
+  const ymd = quotationExpiresAtYmd?.trim();
+  if (ymd && /^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    const today = localTodayYmd();
+    const isValidNow = today <= ymd;
+    const expiresAt = new Date(`${ymd}T23:59:59.999`);
+    return { expiresAt: Number.isNaN(expiresAt.getTime()) ? null : expiresAt, isValidNow };
+  }
+  const d = parseDurationDaysDigits(duration);
+  const days = Number(d);
+  if (!Number.isFinite(days) || days <= 0) {
+    return { expiresAt: null, isValidNow: true };
+  }
+  const updatedAt = new Date(updatedAtIso);
+  if (Number.isNaN(updatedAt.getTime())) {
+    return { expiresAt: null, isValidNow: true };
+  }
+  const expiresAt = new Date(updatedAt.getTime() + days * 24 * 60 * 60 * 1000);
+  return { expiresAt, isValidNow: Date.now() <= expiresAt.getTime() };
 }
 
 function formatRupiah(value: number | null | undefined): string {
@@ -482,6 +501,8 @@ export function ShipmentDetail({ id }: { id: string }) {
   const [savingDetails, setSavingDetails] = useState(false);
   const [editVendorName, setEditVendorName] = useState("");
   const [editForwarderName, setEditForwarderName] = useState("");
+  /** Bidding incoterms: `bid:<id>`, `recent:<i>`, FORWARDER_LINER_PICK_OTHER, or "". */
+  const [editForwarderPick, setEditForwarderPick] = useState("");
   const [editWarehouseName, setEditWarehouseName] = useState("");
   const [editIncoterm, setEditIncoterm] = useState("");
   const [editKawasanBerikat, setEditKawasanBerikat] = useState<"" | "Yes" | "No">("");
@@ -491,6 +512,7 @@ export function ShipmentDetail({ id }: { id: string }) {
   const [editProductClassification, setEditProductClassification] = useState("");
   const [editPibType, setEditPibType] = useState("");
   const [editNoRequestPib, setEditNoRequestPib] = useState("");
+  const [editPpjkMkl, setEditPpjkMkl] = useState("");
   const [editNopen, setEditNopen] = useState("");
   const [editNopenDate, setEditNopenDate] = useState("");
   const [editBlAwb, setEditBlAwb] = useState("");
@@ -518,25 +540,32 @@ export function ShipmentDetail({ id }: { id: string }) {
   const [editNetWeightMt, setEditNetWeightMt] = useState("");
   const [editGrossWeightMt, setEditGrossWeightMt] = useState("");
   const [editBmPercentage, setEditBmPercentage] = useState("");
+  const [editPpnPercentage, setEditPpnPercentage] = useState("");
+  const [editPphPercentage, setEditPphPercentage] = useState("");
   const [editClosedAt, setEditClosedAt] = useState("");
   const [bids, setBids] = useState<ShipmentBid[]>([]);
   const [loadingBids, setLoadingBids] = useState(false);
+  const [recentForwarders, setRecentForwarders] = useState<RecentForwarderBid[]>([]);
+  const [loadingRecentForwarders, setLoadingRecentForwarders] = useState(false);
   const [bidForwarder, setBidForwarder] = useState("");
   const [bidServiceAmount, setBidServiceAmount] = useState("");
-  const [bidDuration, setBidDuration] = useState("");
-  const [bidOriginPort, setBidOriginPort] = useState("");
+  const [bidQuotationExpiresAt, setBidQuotationExpiresAt] = useState("");
   const [bidDestinationPort, setBidDestinationPort] = useState("");
   const [bidShipVia, setBidShipVia] = useState("");
   const [addingBid, setAddingBid] = useState(false);
   const [editingBidId, setEditingBidId] = useState<string | null>(null);
   const [editBidForwarder, setEditBidForwarder] = useState("");
   const [editBidServiceAmount, setEditBidServiceAmount] = useState("");
-  const [editBidDuration, setEditBidDuration] = useState("");
-  const [editBidOriginPort, setEditBidOriginPort] = useState("");
+  const [editBidQuotationExpiresAt, setEditBidQuotationExpiresAt] = useState("");
   const [editBidDestinationPort, setEditBidDestinationPort] = useState("");
   const [editBidShipVia, setEditBidShipVia] = useState("");
   const [uploadingQuotationForBidId, setUploadingQuotationForBidId] = useState<string | null>(null);
+  const [applyingRecentForwarderKey, setApplyingRecentForwarderKey] = useState<string | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState<"details" | "forwarder-bidding">("details");
+  /** EXW/FCA/FOB: edit state for origin on Details (Pre Shipment); same values persist via Save shipment. */
+  const [biddingLaneCountry, setBiddingLaneCountry] = useState("");
+  const [biddingLanePort, setBiddingLanePort] = useState("");
+  const [debouncedLaneCountry, setDebouncedLaneCountry] = useState("");
   const [poEditInvoiceNoByIntake, setPoEditInvoiceNoByIntake] = useState<Record<string, string>>({});
   const [poEditCurrencyRateByIntake, setPoEditCurrencyRateByIntake] = useState<Record<string, string>>({});
   const [poEditReceivedQtyByIntake, setPoEditReceivedQtyByIntake] = useState<Record<string, Record<string, string>>>(
@@ -577,24 +606,61 @@ export function ShipmentDetail({ id }: { id: string }) {
     load();
   }, [load]);
 
-  const hasBiddingStep = useMemo(() => {
-    const incoterm = (detail?.incoterm ?? "").trim().toUpperCase();
-    return INCOTERMS_WITH_BIDDING_TRANSPORTER.includes(incoterm as (typeof INCOTERMS_WITH_BIDDING_TRANSPORTER)[number]);
-  }, [detail?.incoterm]);
+  /**
+   * Incoterm that drives workflow UI (bidding tab, origin lane vs free-text, bid loading) and must match
+   * `detailForStatusValidation` / status rules. Uses draft incoterm while Update shipment is open.
+   */
+  const workflowIncoterm = useMemo(() => {
+    if (!detail) return null;
+    if (isUpdatingShipment) return editIncoterm.trim() || detail.incoterm || null;
+    return detail.incoterm;
+  }, [detail, isUpdatingShipment, editIncoterm]);
 
-  const forwarderOptionsFromBids = useMemo(() => {
-    const names = bids
-      .map((b) => b.forwarder_name?.trim())
-      .filter((v): v is string => !!v);
-    if (editForwarderName.trim() && !names.includes(editForwarderName.trim())) {
-      names.unshift(editForwarderName.trim());
-    }
-    return [...new Set(names)];
-  }, [bids, editForwarderName]);
+  const hasBiddingStep = useMemo(() => {
+    const n = (workflowIncoterm ?? "").trim().toUpperCase();
+    return INCOTERMS_WITH_BIDDING_TRANSPORTER.includes(n as (typeof INCOTERMS_WITH_BIDDING_TRANSPORTER)[number]);
+  }, [workflowIncoterm]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedLaneCountry(biddingLaneCountry.trim()), 400);
+    return () => window.clearTimeout(t);
+  }, [biddingLaneCountry]);
+
+  useEffect(() => {
+    if (!detail || !hasBiddingStep) return;
+    setBiddingLaneCountry(detail.origin_port_country ?? "");
+    setBiddingLanePort(detail.origin_port_name ?? "");
+  }, [detail?.id, detail?.origin_port_country, detail?.origin_port_name, hasBiddingStep]);
+
+  const hasForwarderNamesOnShipment = useMemo(() => {
+    const liner = (detail?.forwarder_name ?? "").trim();
+    return liner.length > 0 || bids.length > 0;
+  }, [detail?.forwarder_name, bids.length]);
+
+  const effectiveLaneOriginCountry = useMemo(
+    () => (biddingLaneCountry.trim() || (detail?.origin_port_country ?? "").trim()),
+    [biddingLaneCountry, detail?.origin_port_country]
+  );
+
+  const fetchRecentForwarders = useCallback(() => {
+    if (!accessToken || !id || !hasBiddingStep) return;
+    setLoadingRecentForwarders(true);
+    const originQ = debouncedLaneCountry.trim() || (detail?.origin_port_country ?? "").trim();
+    listRecentShipmentForwarders(id, 30, accessToken, originQ || undefined)
+      .then((res) => {
+        if (!isApiError(res) && res.data) setRecentForwarders(res.data);
+      })
+      .finally(() => setLoadingRecentForwarders(false));
+  }, [accessToken, id, hasBiddingStep, debouncedLaneCountry, detail?.origin_port_country]);
 
   const originPortCountryOptions = useMemo(
     () => getCountryOptions(editOriginPortCountry).filter((o) => o !== ""),
     [editOriginPortCountry]
+  );
+
+  const biddingLaneCountryOptions = useMemo(
+    () => getCountryOptions(biddingLaneCountry).filter((o) => o !== ""),
+    [biddingLaneCountry]
   );
 
   const loadBids = useCallback(() => {
@@ -604,13 +670,24 @@ export function ShipmentDetail({ id }: { id: string }) {
       .then((res) => {
         if (!isApiError(res) && res.data) setBids(res.data);
       })
-      .finally(() => setLoadingBids(false));
-  }, [accessToken, id, hasBiddingStep]);
+      .finally(() => {
+        setLoadingBids(false);
+        fetchRecentForwarders();
+      });
+  }, [accessToken, id, hasBiddingStep, fetchRecentForwarders]);
 
   useEffect(() => {
     if (hasBiddingStep && id) loadBids();
-    else setBids([]);
+    else {
+      setBids([]);
+      setRecentForwarders([]);
+    }
   }, [hasBiddingStep, id, loadBids]);
+
+  useEffect(() => {
+    if (!hasBiddingStep || !id || !accessToken) return;
+    fetchRecentForwarders();
+  }, [hasBiddingStep, id, accessToken, fetchRecentForwarders, debouncedLaneCountry, detail?.forwarder_name]);
 
   // When incoterm is no longer EXW/FCA/FOB, switch back to Details tab (Forwarder Bidding only applies to those incoterms)
   useEffect(() => {
@@ -660,6 +737,7 @@ export function ShipmentDetail({ id }: { id: string }) {
     setEditProductClassification(normalizeProductClassificationForEdit(detail.product_classification));
     setEditPibType(normalizePibTypeForEdit(detail.pib_type));
     setEditNoRequestPib(detail.no_request_pib ?? "");
+    setEditPpjkMkl(detail.ppjk_mkl ?? "");
     setEditNopen(detail.nopen ?? "");
     setEditNopenDate(detail.nopen_date ? detail.nopen_date.slice(0, 10) : "");
     setEditBlAwb(detail.bl_awb ?? "");
@@ -667,6 +745,11 @@ export function ShipmentDetail({ id }: { id: string }) {
     setEditCoo(detail.coo ?? "");
     setEditOriginPortName(detail.origin_port_name ?? "");
     setEditOriginPortCountry(detail.origin_port_country ?? "");
+    const incForLane = (detail.incoterm ?? "").trim().toUpperCase();
+    if (INCOTERMS_WITH_BIDDING_TRANSPORTER.includes(incForLane as (typeof INCOTERMS_WITH_BIDDING_TRANSPORTER)[number])) {
+      setBiddingLaneCountry(detail.origin_port_country ?? "");
+      setBiddingLanePort(detail.origin_port_name ?? "");
+    }
     setEditEtd(detail.etd ? detail.etd.slice(0, 10) : "");
     setEditAtd(detail.atd ? detail.atd.slice(0, 10) : "");
     setEditDestinationPortName(detail.destination_port_name ?? "");
@@ -686,7 +769,10 @@ export function ShipmentDetail({ id }: { id: string }) {
     );
     setEditIncotermAmount(
       detail.incoterm_amount != null
-        ? formatPriceInputWithCommas(String(detail.incoterm_amount).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(
+            roundTo2Decimals(Number(detail.incoterm_amount)).toFixed(2),
+            2
+          )
         : ""
     );
     setEditCbm(detail.cbm != null ? String(detail.cbm) : "");
@@ -694,11 +780,44 @@ export function ShipmentDetail({ id }: { id: string }) {
     setEditGrossWeightMt(detail.gross_weight_mt != null ? String(detail.gross_weight_mt) : "");
     setEditBmPercentage(
       detail.bm_percentage != null
-        ? formatPriceInputWithCommas(String(detail.bm_percentage).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.bm_percentage)).toFixed(2), 2)
+        : ""
+    );
+    setEditPpnPercentage(
+      detail.ppn_percentage != null
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.ppn_percentage)).toFixed(2), 2)
+        : ""
+    );
+    setEditPphPercentage(
+      detail.pph_percentage != null
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.pph_percentage)).toFixed(2), 2)
         : ""
     );
     setEditClosedAt(detail.closed_at ? detail.closed_at.slice(0, 10) : "");
     initPoMappingEditsFromDetail(detail);
+    {
+      const inc = (detail.incoterm ?? "").trim().toUpperCase();
+      if (INCOTERMS_WITH_BIDDING_TRANSPORTER.includes(inc as (typeof INCOTERMS_WITH_BIDDING_TRANSPORTER)[number])) {
+        const fn = (detail.forwarder_name ?? "").trim();
+        if (!fn) {
+          setEditForwarderPick("");
+        } else {
+          const bidMatch = bids.find((b) => (b.forwarder_name ?? "").trim() === fn);
+          if (bidMatch) {
+            setEditForwarderPick(`bid:${bidMatch.id}`);
+          } else {
+            const ri = recentForwarders.findIndex((r) => (r.forwarder_name ?? "").trim() === fn);
+            if (ri >= 0) {
+              setEditForwarderPick(`recent:${ri}`);
+            } else {
+              setEditForwarderPick(FORWARDER_LINER_PICK_OTHER);
+            }
+          }
+        }
+      } else {
+        setEditForwarderPick("");
+      }
+    }
     setIsUpdatingShipment(true);
     setActionError(null);
   }
@@ -807,15 +926,28 @@ export function ShipmentDetail({ id }: { id: string }) {
   function handleAddBid(e: React.FormEvent) {
     e.preventDefault();
     if (!accessToken || !id || !bidForwarder.trim() || !canEditShipment) return;
+    const laneCountry = (biddingLaneCountry.trim() || (detail?.origin_port_country ?? "").trim());
+    const lanePort = (biddingLanePort.trim() || (detail?.origin_port_name ?? "").trim());
+    if (!laneCountry) {
+      pushToast("Set origin port country under Lane origin before adding a participant.", "error");
+      return;
+    }
+    if (!lanePort) {
+      pushToast("Set origin port name under Lane origin before adding a participant.", "error");
+      return;
+    }
     setActionError(null);
     setAddingBid(true);
     createShipmentBid(
       id,
       {
         forwarder_name: bidForwarder.trim(),
-        service_amount: parseCommaFormattedDecimal(bidServiceAmount),
-        duration: formatDurationForApi(bidDuration),
-        origin_port: bidOriginPort.trim() || undefined,
+        service_amount: (() => {
+          const n = parseCommaFormattedDecimal(bidServiceAmount);
+          return n != null ? roundTo2Decimals(n) : undefined;
+        })(),
+        quotation_expires_at: bidQuotationExpiresAt.trim() || undefined,
+        origin_port: lanePort || undefined,
         destination_port: bidDestinationPort.trim() || undefined,
         ship_via: bidShipVia.trim() || undefined,
       },
@@ -830,13 +962,38 @@ export function ShipmentDetail({ id }: { id: string }) {
         if (res.data) setBids((prev) => [...prev, res.data!]);
         setBidForwarder("");
         setBidServiceAmount("");
-        setBidDuration("");
-        setBidOriginPort("");
+        setBidQuotationExpiresAt("");
         setBidDestinationPort("");
         setBidShipVia("");
         pushToast("Forwarder bid added.", "success");
+        fetchRecentForwarders();
       })
       .finally(() => setAddingBid(false));
+  }
+
+  function applyForwarderFromRecent(row: RecentForwarderBid) {
+    const name = row.forwarder_name.trim();
+    if (!name || !accessToken || !id) return;
+    const rowKey = `${row.shipment_id}:${name}`;
+    setBidForwarder(name);
+    setEditForwarderName(name);
+    if (!canEditShipment) return;
+    setApplyingRecentForwarderKey(rowKey);
+    updateShipment(id, { forwarder_name: name }, accessToken)
+      .then((res) => {
+        if (isApiError(res)) {
+          pushToast(res.message, "error");
+          return;
+        }
+        if (res.data) setDetail(res.data);
+        fetchRecentForwarders();
+        pushToast("Forwarder / liner saved — opening Details so you can confirm.", "success");
+        setActiveDetailTab("details");
+        window.setTimeout(() => {
+          document.getElementById("field-forwarder-liner")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 120);
+      })
+      .finally(() => setApplyingRecentForwarderKey(null));
   }
 
   function startEditBid(bid: ShipmentBid) {
@@ -844,11 +1001,10 @@ export function ShipmentDetail({ id }: { id: string }) {
     setEditBidForwarder(bid.forwarder_name);
     setEditBidServiceAmount(
       bid.service_amount != null
-        ? formatPriceInputWithCommas(String(bid.service_amount).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(bid.service_amount)).toFixed(2), 2)
         : ""
     );
-    setEditBidDuration(parseDurationDaysDigits(bid.duration));
-    setEditBidOriginPort(bid.origin_port ?? "");
+    setEditBidQuotationExpiresAt(bid.quotation_expires_at?.trim().slice(0, 10) ?? "");
     setEditBidDestinationPort(bid.destination_port ?? "");
     setEditBidShipVia(bid.ship_via ?? "");
   }
@@ -856,15 +1012,25 @@ export function ShipmentDetail({ id }: { id: string }) {
   function handleSaveBid(e: React.FormEvent) {
     e.preventDefault();
     if (!accessToken || !id || !editingBidId || !canEditShipment) return;
+    const laneCountry = (biddingLaneCountry.trim() || (detail?.origin_port_country ?? "").trim());
+    const lanePort = (biddingLanePort.trim() || (detail?.origin_port_name ?? "").trim());
+    if (!laneCountry || !lanePort) {
+      pushToast("Set lane origin country and port before saving the bid.", "error");
+      return;
+    }
     setActionError(null);
     updateShipmentBid(
       id,
       editingBidId,
       {
         forwarder_name: editBidForwarder.trim(),
-        service_amount: editBidServiceAmount.trim() ? parseCommaFormattedDecimal(editBidServiceAmount) : undefined,
-        duration: formatDurationForApi(editBidDuration),
-        origin_port: editBidOriginPort.trim() || undefined,
+        service_amount: (() => {
+          if (!editBidServiceAmount.trim()) return undefined;
+          const n = parseCommaFormattedDecimal(editBidServiceAmount);
+          return n != null ? roundTo2Decimals(n) : undefined;
+        })(),
+        quotation_expires_at: editBidQuotationExpiresAt.trim() || null,
+        origin_port: lanePort || undefined,
         destination_port: editBidDestinationPort.trim() || undefined,
         ship_via: editBidShipVia.trim() || undefined,
       },
@@ -879,6 +1045,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         if (res.data) setBids((prev) => prev.map((b) => (b.id === editingBidId ? res.data! : b)));
         setEditingBidId(null);
         pushToast("Bid updated.", "success");
+        fetchRecentForwarders();
       });
   }
 
@@ -893,6 +1060,7 @@ export function ShipmentDetail({ id }: { id: string }) {
       }
       setBids((prev) => prev.filter((b) => b.id !== bidId));
       pushToast("Bid removed.", "success");
+      fetchRecentForwarders();
     });
   }
 
@@ -956,6 +1124,11 @@ export function ShipmentDetail({ id }: { id: string }) {
         }
         if (res.data) setShipmentDocuments((prev) => [res.data!, ...prev]);
         pushToast("Document uploaded.", "success");
+      })
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setActionError(msg);
+        pushToast(msg, "error");
       })
       .finally(() => setUploadingDocSlotKey(null));
   }
@@ -1057,6 +1230,19 @@ export function ShipmentDetail({ id }: { id: string }) {
   }
 
   function handleShipByEditChange(next: string) {
+    if (!next.trim()) {
+      setEditShipBy("");
+      setEditUnit20ft(false);
+      setEditUnit40ft(false);
+      setEditUnitPackage(false);
+      setEditUnit20IsoTank(false);
+      setEditContainerCount20ft("");
+      setEditContainerCount40ft("");
+      setEditPackageCount("");
+      setEditContainerCount20IsoTank("");
+      setEditCbm("");
+      return;
+    }
     setEditShipBy(next);
     if (next === "Bulk") {
       setEditUnit20ft(false);
@@ -1077,6 +1263,48 @@ export function ShipmentDetail({ id }: { id: string }) {
     } else if (next === "FCL") {
       setEditUnitPackage(false);
       setEditPackageCount("");
+    }
+    if (next !== "LCL") {
+      setEditCbm("");
+    }
+  }
+
+  function applyLinerFieldsFromBidOrRecent(
+    forwarderName: string,
+    shipVia: string | null | undefined,
+    destinationPort: string | null | undefined
+  ) {
+    setEditForwarderName((forwarderName ?? "").trim());
+    const m = normalizeBidShipViaToShipmentMethod(shipVia);
+    setEditShipmentMethod(m);
+    if (m === "Air") handleShipByEditChange("");
+    setEditDestinationPortName((destinationPort ?? "").trim());
+  }
+
+  function handleForwarderPickChange(value: string) {
+    setEditForwarderPick(value);
+    if (value === "") {
+      setEditForwarderName("");
+      return;
+    }
+    if (value === FORWARDER_LINER_PICK_OTHER) {
+      setEditForwarderName("");
+      return;
+    }
+    if (value.startsWith("bid:")) {
+      const bidId = value.slice(4);
+      const bid = bids.find((b) => b.id === bidId);
+      if (bid) {
+        applyLinerFieldsFromBidOrRecent(bid.forwarder_name, bid.ship_via, bid.destination_port);
+      }
+      return;
+    }
+    if (value.startsWith("recent:")) {
+      const idx = Number(value.slice(7));
+      const row = recentForwarders[idx];
+      if (row) {
+        applyLinerFieldsFromBidOrRecent(row.forwarder_name, row.ship_via, row.destination_port);
+      }
     }
   }
 
@@ -1134,9 +1362,148 @@ export function ShipmentDetail({ id }: { id: string }) {
     return parts.length > 0 ? parts.join(", ") : "—";
   }
 
+  /**
+   * Snapshot used for status-transition validation and highlights.
+   * When "Update shipment" is open, merge edit state so checks match unsaved form values (and PO mapping / delivered qty drafts).
+   */
+  const detailForStatusValidation = useMemo((): ShipmentDetailType | null => {
+    if (!detail) return null;
+    if (!isUpdatingShipment) return detail;
+
+    const method =
+      editShipmentMethod.trim() !== "" ? editShipmentMethod.trim() : detail.shipment_method;
+    const sea = isShipmentMethodSea(method);
+
+    const origin_port_name = (hasBiddingStep ? biddingLanePort : editOriginPortName).trim() || null;
+    const origin_port_country = (hasBiddingStep ? biddingLaneCountry : editOriginPortCountry).trim() || null;
+
+    const depoVal: boolean | null =
+      editDepo === "yes" ? true : editDepo === "no" ? false : detail.depo;
+
+    const surveyorVal =
+      editSurveyor === "Yes" || editSurveyor === "No" ? editSurveyor : detail.surveyor;
+
+    const incotermAmtFromEdit = editIncotermAmount.trim()
+      ? roundTo2Decimals(Number(stripCommaThousands(editIncotermAmount.trim())))
+      : null;
+    const incoterm_amount =
+      incotermAmtFromEdit != null && Number.isFinite(incotermAmtFromEdit)
+        ? incotermAmtFromEdit
+        : detail.incoterm_amount;
+
+    const bmFromEdit = editBmPercentage.trim()
+      ? roundTo2Decimals(Number(stripCommaThousands(editBmPercentage.trim())))
+      : null;
+    const bm_percentage =
+      bmFromEdit != null && Number.isFinite(bmFromEdit) ? bmFromEdit : detail.bm_percentage;
+
+    const linkedPosEff = (() => {
+      const base = detail.linked_pos ?? [];
+      if (base.length === 0) return base;
+
+      const rateRawFromAnyPo = base
+        .map((po) => stripCommaThousands((poEditCurrencyRateByIntake[po.intake_id] ?? "").trim()))
+        .find((s) => s.length > 0);
+      const parsedSharedRate = rateRawFromAnyPo ? Number(rateRawFromAnyPo) : NaN;
+      const sharedNonIdrRate =
+        Number.isFinite(parsedSharedRate) && parsedSharedRate > 0
+          ? roundTo2Decimals(parsedSharedRate)
+          : undefined;
+
+      return base.map((po) => {
+        const pd = poDetailsCache[po.intake_id];
+        const idr = isCurrencyIdr(resolvePoCurrencyCode(po, pd));
+        let currency_rate = po.currency_rate;
+        if (!idr && sharedNonIdrRate !== undefined) {
+          currency_rate = sharedNonIdrRate;
+        }
+
+        const qtyDraft = poEditReceivedQtyByIntake[po.intake_id];
+        let line_received = po.line_received;
+        if (qtyDraft) {
+          const items = pd?.items ?? [];
+          if (items.length > 0) {
+            line_received = items.map((it) => ({
+              item_id: it.id,
+              received_qty: parseDeliveredQtyInput(qtyDraft[it.id] ?? ""),
+            }));
+          } else if (line_received && line_received.length > 0) {
+            line_received = line_received.map((l) => ({
+              ...l,
+              received_qty: parseDeliveredQtyInput(qtyDraft[l.item_id] ?? ""),
+            }));
+          }
+        }
+
+        return { ...po, currency_rate, line_received };
+      });
+    })();
+
+    return {
+      ...detail,
+      incoterm: workflowIncoterm ?? detail.incoterm,
+      forwarder_name: editForwarderName.trim() || detail.forwarder_name,
+      shipment_method: method ?? detail.shipment_method,
+      ship_by: sea ? (editShipBy.trim() || detail.ship_by) : null,
+      pib_type: editPibType.trim() || detail.pib_type,
+      origin_port_name,
+      origin_port_country,
+      etd: editEtd.trim() || detail.etd,
+      eta: editEta.trim() || detail.eta,
+      product_classification: editProductClassification.trim() || detail.product_classification,
+      depo: depoVal,
+      surveyor: surveyorVal,
+      destination_port_name: editDestinationPortName.trim() || detail.destination_port_name,
+      destination_port_country: DESTINATION_PORT_COUNTRY,
+      incoterm_amount,
+      atd: editAtd.trim() || detail.atd,
+      bl_awb: editBlAwb.trim() || detail.bl_awb,
+      no_request_pib: editNoRequestPib.trim() || detail.no_request_pib,
+      ppjk_mkl: editPpjkMkl.trim() || detail.ppjk_mkl,
+      ata: editAta.trim() || detail.ata,
+      nopen: editNopen.trim() || detail.nopen,
+      nopen_date: editNopenDate.trim() || detail.nopen_date,
+      bm_percentage,
+      closed_at: editClosedAt.trim() || detail.closed_at,
+      linked_pos: linkedPosEff,
+    };
+  }, [
+    detail,
+    isUpdatingShipment,
+    hasBiddingStep,
+    workflowIncoterm,
+    biddingLanePort,
+    biddingLaneCountry,
+    editForwarderName,
+    editShipmentMethod,
+    editShipBy,
+    editPibType,
+    editOriginPortName,
+    editOriginPortCountry,
+    editEtd,
+    editEta,
+    editProductClassification,
+    editDepo,
+    editSurveyor,
+    editDestinationPortName,
+    editIncotermAmount,
+    editBmPercentage,
+    editAtd,
+    editBlAwb,
+    editNoRequestPib,
+    editPpjkMkl,
+    editAta,
+    editNopen,
+    editNopenDate,
+    editClosedAt,
+    poEditCurrencyRateByIntake,
+    poEditReceivedQtyByIntake,
+    poDetailsCache,
+  ]);
+
   const applicableStatuses = useMemo(
-    () => getApplicableStatuses(detail?.incoterm),
-    [detail?.incoterm]
+    () => getApplicableStatuses(workflowIncoterm),
+    [workflowIncoterm]
   );
 
   const steppedTimeline = useMemo((): TimelineItemType[] => {
@@ -1172,30 +1539,53 @@ export function ShipmentDetail({ id }: { id: string }) {
   }, [detail?.current_status, timeline, applicableStatuses]);
 
   const missingForStatusUpdate = useMemo(() => {
-    if (!detail || !newStatus.trim()) return [];
-    const fields = getMissingRequiredFields(detail.current_status, newStatus.trim(), {
-      ...detail,
+    if (!detailForStatusValidation || !newStatus.trim()) return [];
+    const fields = getMissingRequiredFields(detailForStatusValidation.current_status, newStatus.trim(), {
+      ...detailForStatusValidation,
       bids,
     });
-    const docs = getMissingRequiredDocuments(detail.current_status, newStatus.trim(), detail.incoterm, {
-      documents: shipmentDocuments,
-      linked_pos: detail.linked_pos ?? [],
-      surveyor: detail.surveyor,
-    });
+    const docs = getMissingRequiredDocuments(
+      detailForStatusValidation.current_status,
+      newStatus.trim(),
+      detailForStatusValidation.incoterm,
+      {
+        documents: shipmentDocuments,
+        linked_pos: detailForStatusValidation.linked_pos ?? [],
+        surveyor: detailForStatusValidation.surveyor,
+      }
+    );
     return [...fields, ...docs];
-  }, [detail, newStatus, bids, shipmentDocuments]);
+  }, [detailForStatusValidation, newStatus, bids, shipmentDocuments]);
 
   const requiredDocsForUpdate = useMemo(() => {
-    if (!detail || !newStatus.trim()) return [];
-    return getRequiredDocsForTransition(detail.current_status, newStatus.trim(), detail.incoterm);
-  }, [detail, newStatus]);
+    if (!detailForStatusValidation || !newStatus.trim()) return [];
+    return getRequiredDocsForTransition(
+      detailForStatusValidation.current_status,
+      newStatus.trim(),
+      detailForStatusValidation.incoterm
+    );
+  }, [detailForStatusValidation, newStatus]);
 
   const canProceedStatusUpdate = newStatus.trim() !== "" && missingForStatusUpdate.length === 0;
 
+  const pibTypeForDutyRules = useMemo(() => {
+    if (!detail) return null;
+    if (isUpdatingShipment && editPibType.trim()) return editPibType.trim();
+    return detail.pib_type;
+  }, [detail, isUpdatingShipment, editPibType]);
+
+  const dutyCalculationSkipped = useMemo(() => isPibTypeBc23(pibTypeForDutyRules), [pibTypeForDutyRules]);
+
   const requiredFieldsForStatusUpdate = useMemo(() => {
-    if (!detail || !newStatus.trim()) return [] as string[];
-    return getRequiredFieldsForTransition(detail.current_status, newStatus.trim(), detail.incoterm);
-  }, [detail, newStatus]);
+    if (!detailForStatusValidation || !newStatus.trim()) return [] as string[];
+    return getRequiredFieldsForTransition(
+      detailForStatusValidation.current_status,
+      newStatus.trim(),
+      detailForStatusValidation.incoterm,
+      detailForStatusValidation.pib_type,
+      detailForStatusValidation.shipment_method
+    );
+  }, [detailForStatusValidation, newStatus]);
 
   const requiredForUpdateSet = useMemo(
     () => new Set(requiredFieldsForStatusUpdate),
@@ -1241,8 +1631,14 @@ export function ShipmentDetail({ id }: { id: string }) {
       .join(" ");
   }, [newStatus, requiredForUpdateSet, missingForUpdateSet]);
 
-  const scrollToStatusRequirement = useCallback((fieldKey: string) => {
+  const scrollToStatusRequirement = useCallback(
+    (fieldKey: string, opts?: { afterTabSwitch?: boolean }) => {
     if (fieldKey.startsWith("doc:")) {
+      if (activeDetailTab === "forwarder-bidding" && !opts?.afterTabSwitch) {
+        setActiveDetailTab("details");
+        window.setTimeout(() => scrollToStatusRequirement(fieldKey, { afterTabSwitch: true }), 150);
+        return;
+      }
       document.getElementById("section-shipment-documents")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
@@ -1251,6 +1647,11 @@ export function ShipmentDetail({ id }: { id: string }) {
       window.requestAnimationFrame(() => {
         document.getElementById("section-forwarder-bidding")?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
+      return;
+    }
+    if (activeDetailTab === "forwarder-bidding" && !opts?.afterTabSwitch) {
+      setActiveDetailTab("details");
+      window.setTimeout(() => scrollToStatusRequirement(fieldKey, { afterTabSwitch: true }), 150);
       return;
     }
     const poKeys = ["has_linked_po", "has_received_this_shipment", "has_currency_rate"];
@@ -1265,7 +1666,9 @@ export function ShipmentDetail({ id }: { id: string }) {
     }
     const el = document.querySelector(`[data-status-field="${CSS.escape(fieldKey)}"]`);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
+  },
+    [activeDetailTab, hasBiddingStep]
+  );
 
   const nextStatusOptions = useMemo(() => {
     const current = detail?.current_status ?? "";
@@ -1287,7 +1690,7 @@ export function ShipmentDetail({ id }: { id: string }) {
   const primaryGroupedPoCurrency = primaryGroupedPo
     ? resolvePoCurrencyCode(primaryGroupedPo, poDetailsCache[primaryGroupedPo.intake_id])
     : null;
-  const groupedPoIsIdr = (primaryGroupedPoCurrency ?? "").trim().toUpperCase() === "IDR";
+  const groupedPoIsIdr = isCurrencyIdr(primaryGroupedPoCurrency);
 
   const [portalMounted, setPortalMounted] = useState(false);
   useEffect(() => {
@@ -1366,7 +1769,7 @@ export function ShipmentDetail({ id }: { id: string }) {
     const sharedRateSource = d.linked_pos.find((po) => po.currency_rate != null)?.currency_rate;
     const sharedRate =
       sharedRateSource != null
-        ? formatPriceInputWithCommas(String(sharedRateSource).replace(/,/g, ""))
+        ? formatPriceInputWithCommas(roundTo2Decimals(Number(sharedRateSource)).toFixed(2), 2)
         : "";
     d.linked_pos.forEach((po) => {
       inv[po.intake_id] = sharedInvoice;
@@ -1401,6 +1804,7 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   function cancelUpdateMode() {
     setIsUpdatingShipment(false);
+    setEditForwarderPick("");
     if (detail) initPoMappingEditsFromDetail(detail);
     setPoEditReceivedQtyByIntake({});
   }
@@ -1413,8 +1817,11 @@ export function ShipmentDetail({ id }: { id: string }) {
       if (!first) return true;
       const invoiceNo = (poEditInvoiceNoByIntake[first.intake_id] ?? "").trim() || undefined;
       const firstCurrency = resolvePoCurrencyCode(first, poDetailsCache[first.intake_id]);
-      const isIdr = (firstCurrency ?? "").trim().toUpperCase() === "IDR";
-      const rateRaw = stripCommaThousands((poEditCurrencyRateByIntake[first.intake_id] ?? "").trim());
+      const isIdr = isCurrencyIdr(firstCurrency);
+      const rateRawFromAnyPo = linkedPos
+        .map((po) => stripCommaThousands((poEditCurrencyRateByIntake[po.intake_id] ?? "").trim()))
+        .find((s) => s.length > 0);
+      const rateRaw = rateRawFromAnyPo ?? "";
       const parsedRate = rateRaw ? Number(rateRaw) : undefined;
       const currentStatus = detail?.current_status ?? "";
       const customsIdx = SHIPMENT_STATUSES.indexOf("CUSTOMS_CLEARANCE");
@@ -1431,10 +1838,8 @@ export function ShipmentDetail({ id }: { id: string }) {
       let currencyRateForApi: number | null | undefined;
       if (isIdr) {
         currencyRateForApi = null;
-      } else if (enforceNonIdrCurrencyRate) {
-        currencyRateForApi = parsedRate ?? null;
       } else if (Number.isFinite(parsedRate) && (parsedRate ?? 0) > 0) {
-        currencyRateForApi = parsedRate;
+        currencyRateForApi = roundTo2Decimals(parsedRate as number);
       } else {
         currencyRateForApi = undefined;
       }
@@ -1512,9 +1917,19 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   async function handleSaveDetails(e: React.FormEvent) {
     e.preventDefault();
-    if (!accessToken || !id) return;
+    if (!accessToken || !id || !detail) return;
     setActionError(null);
     setSavingDetails(true);
+
+    const etdSave = editEtd.trim();
+    const etaSave = editEta.trim();
+    if (etdSave && etaSave && etaSave <= etdSave) {
+      const msg = "ETA must be after ETD.";
+      setActionError(msg);
+      pushToast(msg, "error");
+      setSavingDetails(false);
+      return;
+    }
 
     const parseOptInt = (raw: string, errMsg: string): number | null | false => {
       const t = raw.trim();
@@ -1533,7 +1948,10 @@ export function ShipmentDetail({ id }: { id: string }) {
     let packageCount: number | null = null;
     let containerCount20Iso: number | null = null;
 
-    if (editUnit20ft) {
+    const methodForSave = (editShipmentMethod.trim() || detail.shipment_method || "").trim();
+    const sea = isShipmentMethodSea(methodForSave);
+
+    if (sea && editUnit20ft) {
       const v = parseOptInt(
         editContainerCount20ft,
         "Number of 20″ containers must be a non-negative whole number."
@@ -1544,7 +1962,7 @@ export function ShipmentDetail({ id }: { id: string }) {
       }
       containerCount20ft = v;
     }
-    if (editUnit40ft) {
+    if (sea && editUnit40ft) {
       const v = parseOptInt(
         editContainerCount40ft,
         "Number of 40″ containers must be a non-negative whole number."
@@ -1555,7 +1973,7 @@ export function ShipmentDetail({ id }: { id: string }) {
       }
       containerCount40ft = v;
     }
-    if (editUnitPackage) {
+    if (sea && editUnitPackage) {
       const v = parseOptInt(editPackageCount, "Number of packages must be a non-negative whole number.");
       if (v === false) {
         setSavingDetails(false);
@@ -1563,7 +1981,7 @@ export function ShipmentDetail({ id }: { id: string }) {
       }
       packageCount = v;
     }
-    if (editUnit20IsoTank) {
+    if (sea && editUnit20IsoTank) {
       const v = parseOptInt(
         editContainerCount20IsoTank,
         "Number of 20″ ISO tanks must be a non-negative whole number."
@@ -1575,9 +1993,51 @@ export function ShipmentDetail({ id }: { id: string }) {
       containerCount20Iso = v;
     }
 
-    const sb = editShipBy.trim();
-    const unitFields =
-      sb === "Bulk"
+    const pibForSave = editPibType.trim() || detail.pib_type;
+    if (!isPibTypeBc23(pibForSave)) {
+      if (editPpnPercentage.trim()) {
+        const n = Number(stripCommaThousands(editPpnPercentage.trim()));
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          const msg = "PPN percentage must be between 0 and 100.";
+          setActionError(msg);
+          pushToast(msg, "error");
+          setSavingDetails(false);
+          return;
+        }
+      }
+      if (editPphPercentage.trim()) {
+        const n = Number(stripCommaThousands(editPphPercentage.trim()));
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          const msg = "PPH percentage must be between 0 and 100.";
+          setActionError(msg);
+          pushToast(msg, "error");
+          setSavingDetails(false);
+          return;
+        }
+      }
+    }
+
+    const sb = sea ? editShipBy.trim() : "";
+    if (sea && !sb) {
+      const msg = "Ship by is required when Ship via is Sea.";
+      setActionError(msg);
+      pushToast(msg, "error");
+      setSavingDetails(false);
+      return;
+    }
+
+    const unitFields = !sea
+      ? {
+          unit_20ft: false,
+          unit_40ft: false,
+          unit_package: false,
+          unit_20_iso_tank: false,
+          container_count_20ft: null as number | null,
+          container_count_40ft: null as number | null,
+          package_count: null as number | null,
+          container_count_20_iso_tank: null as number | null,
+        }
+      : sb === "Bulk"
         ? {
             unit_20ft: false,
             unit_40ft: false,
@@ -1629,17 +2089,22 @@ export function ShipmentDetail({ id }: { id: string }) {
       kawasan_berikat: editKawasanBerikat === "Yes" || editKawasanBerikat === "No" ? editKawasanBerikat : null,
       surveyor: editSurveyor === "Yes" || editSurveyor === "No" ? editSurveyor : null,
       shipment_method: editShipmentMethod.trim() || undefined,
-      ship_by: editShipBy.trim() || undefined,
+      ship_by: sea ? editShipBy.trim() || undefined : null,
       product_classification: editProductClassification.trim() || null,
       pib_type: editPibType.trim() || undefined,
       no_request_pib: editNoRequestPib.trim() || undefined,
+      ppjk_mkl: editPpjkMkl.trim() || undefined,
       nopen: editNopen.trim() || undefined,
       nopen_date: editNopenDate.trim() || undefined,
       bl_awb: editBlAwb.trim() || undefined,
       insurance_no: editInsuranceNo.trim() || undefined,
       coo: editCoo.trim() || undefined,
-      origin_port_name: editOriginPortName.trim() || undefined,
-      origin_port_country: editOriginPortCountry.trim() || undefined,
+      origin_port_name: hasBiddingStep
+        ? biddingLanePort.trim() || undefined
+        : editOriginPortName.trim() || undefined,
+      origin_port_country: hasBiddingStep
+        ? biddingLaneCountry.trim() || undefined
+        : editOriginPortCountry.trim() || undefined,
       etd: editEtd.trim() || undefined,
       atd: editAtd.trim() || undefined,
       destination_port_name: editDestinationPortName.trim() || undefined,
@@ -1651,14 +2116,30 @@ export function ShipmentDetail({ id }: { id: string }) {
         editDepo === "yes" ? editDepoLocation.trim() || null : editDepo === "no" ? null : undefined,
       ...unitFields,
       incoterm_amount: editIncotermAmount.trim()
-        ? Number(stripCommaThousands(editIncotermAmount.trim()))
+        ? roundTo2Decimals(Number(stripCommaThousands(editIncotermAmount.trim())))
         : undefined,
-      cbm: editCbm.trim() ? Number(editCbm) : undefined,
+      cbm:
+        !sea || editShipBy.trim() !== "LCL"
+          ? null
+          : editCbm.trim()
+            ? Number(editCbm)
+            : null,
       net_weight_mt: editNetWeightMt.trim() ? Number(editNetWeightMt) : undefined,
       gross_weight_mt: editGrossWeightMt.trim() ? Number(editGrossWeightMt) : undefined,
-      bm_percentage: editBmPercentage.trim()
-        ? Number(stripCommaThousands(editBmPercentage.trim()))
-        : undefined,
+      bm_percentage:
+        isPibTypeBc23(editPibType.trim() || detail.pib_type) || !editBmPercentage.trim()
+          ? undefined
+          : roundTo2Decimals(Number(stripCommaThousands(editBmPercentage.trim()))),
+      ppn_percentage: isPibTypeBc23(editPibType.trim() || detail.pib_type)
+        ? undefined
+        : !editPpnPercentage.trim()
+          ? null
+          : roundTo2Decimals(Number(stripCommaThousands(editPpnPercentage.trim()))),
+      pph_percentage: isPibTypeBc23(editPibType.trim() || detail.pib_type)
+        ? undefined
+        : !editPphPercentage.trim()
+          ? null
+          : roundTo2Decimals(Number(stripCommaThousands(editPphPercentage.trim()))),
       closed_at: editClosedAt.trim() || undefined,
     };
     try {
@@ -1740,10 +2221,11 @@ export function ShipmentDetail({ id }: { id: string }) {
       fieldKey === "no_request_pib" ||
       fieldKey === "nopen" ||
       fieldKey === "nopen_date" ||
-      fieldKey === "bl_awb" ||
       fieldKey === "incoterm_amount" ||
       fieldKey === "cbm" ||
       fieldKey === "bm_percentage" ||
+      fieldKey === "ppn_percentage" ||
+      fieldKey === "pph_percentage" ||
       fieldKey === "has_currency_rate" ||
       fieldKey === "has_received_this_shipment" ||
       fieldKey === "has_linked_po"
@@ -1754,6 +2236,8 @@ export function ShipmentDetail({ id }: { id: string }) {
       fieldKey === "origin_port_name" ||
       fieldKey === "origin_port_country" ||
       fieldKey === "destination_port_name" ||
+      fieldKey === "bl_awb" ||
+      fieldKey === "ppjk_mkl" ||
       fieldKey === "etd" ||
       fieldKey === "atd" ||
       fieldKey === "eta" ||
@@ -1872,7 +2356,74 @@ export function ShipmentDetail({ id }: { id: string }) {
           <div className={styles.detailMain}>
             <Card id="section-forwarder-bidding" className={`${styles.card} ${biddingCardHighlightClass}`.trim()}>
               <h2 className={styles.categoryTitle}>Forwarder Bidding Transporters</h2>
-              <p className={styles.placeholderNote}>This section is shown only when the shipment incoterm is <strong>EXW</strong>, <strong>FCA</strong>, or <strong>FOB</strong> (buyer arranges transport). Forwarders (delivery service companies) participate in the bidding process. Add participants with service amount, duration, ports, and optional quotation.</p>
+              <p className={styles.placeholderNote}>
+                This section is shown only when the shipment incoterm is <strong>EXW</strong>, <strong>FCA</strong>, or{" "}
+                <strong>FOB</strong> (buyer arranges transport). Set <strong>origin port country</strong> and{" "}
+                <strong>origin port name</strong> on the <strong>Details</strong> tab (Pre Shipment → Origin port); every
+                bid uses those values. Destination port and ship via stay per bid.
+              </p>
+              <Card className={styles.recentForwarderCard}>
+                <h3 className={styles.subsectionTitle}>Recent forwarders (historical)</h3>
+                {loadingRecentForwarders ? (
+                  <p className={styles.placeholder}>Loading recent forwarders…</p>
+                ) : !effectiveLaneOriginCountry ? (
+                  <p className={styles.placeholder}>
+                    Set <strong>origin port country</strong> on the <strong>Details</strong> tab (Pre Shipment → Origin
+                    port) and save the shipment to load historical quotations for the same origin.
+                  </p>
+                ) : !hasForwarderNamesOnShipment ? (
+                  <p className={styles.placeholder}>
+                    Add at least one <strong>bidding participant</strong> or set the <strong>liner forwarder</strong> on
+                    this shipment so we know which forwarder names to match against history.
+                  </p>
+                ) : recentForwarders.length === 0 ? (
+                  <p className={styles.placeholder}>
+                    No historical bid found for those forwarders with this origin country and an active quotation yet.
+                  </p>
+                ) : (
+                  <div className={styles.recentForwarderList}>
+                    {recentForwarders.map((row) => {
+                      const meta = getForwarderQuotationExpiryMeta(row.quotation_expires_at, row.duration, row.updated_at);
+                      const rowKey = `${row.shipment_id}:${row.forwarder_name}`;
+                      const ymd = row.quotation_expires_at?.trim();
+                      const expiryLabel = ymd
+                        ? `Quotation expires: ${formatDayMonthYear(`${ymd}T12:00:00`)}`
+                        : meta.expiresAt
+                          ? `Expires: ${formatDayMonthYear(meta.expiresAt.toISOString())} (from legacy duration)`
+                          : "No expiry set";
+                      return (
+                        <div key={`${row.forwarder_name}-${row.shipment_id}`} className={styles.recentForwarderItem}>
+                          <div className={styles.recentForwarderMain}>
+                            <strong>{row.forwarder_name}</strong>
+                            <span className={styles.recentForwarderMeta}>
+                              Origin country (historical shipment):{" "}
+                              {row.origin_country != null && String(row.origin_country).trim() !== ""
+                                ? String(row.origin_country).trim()
+                                : "—"}
+                            </span>
+                            <span className={styles.recentForwarderMeta}>
+                              Destination country (historical shipment):{" "}
+                              {row.destination_country != null && String(row.destination_country).trim() !== ""
+                                ? String(row.destination_country).trim()
+                                : "—"}
+                            </span>
+                            <span className={styles.recentForwarderMeta}>Last update: {formatDayMonthYear(row.updated_at)}</span>
+                            <span className={styles.recentForwarderMeta}>{expiryLabel}</span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            disabled={applyingRecentForwarderKey === rowKey}
+                            onClick={() => applyForwarderFromRecent(row)}
+                          >
+                            {applyingRecentForwarderKey === rowKey ? "Saving…" : "Use forwarder"}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
               {canEditShipment ? (
                 <form onSubmit={handleAddBid} className={styles.bidForm}>
                   <div className={styles.bidFormGrid}>
@@ -1889,33 +2440,22 @@ export function ShipmentDetail({ id }: { id: string }) {
                         autoComplete="off"
                         className={styles.input}
                         value={bidServiceAmount}
-                        onChange={(e) => setBidServiceAmount(formatPriceInputWithCommas(e.target.value))}
+                        onChange={(e) => setBidServiceAmount(formatPriceInputWithCommas(e.target.value, 2))}
                         placeholder="1,234.56"
                         aria-label="Service amount"
                       />
                     </div>
                     <div className={styles.field}>
-                      <span className={styles.fieldLabel} id="bid-duration-label">
-                        Duration
-                      </span>
-                      <div className={styles.durationFieldRow} role="group" aria-labelledby="bid-duration-label">
-                        <input
-                          id="bid-duration"
-                          type="text"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          className={styles.input}
-                          value={bidDuration}
-                          onChange={(e) => setBidDuration(e.target.value.replace(/\D/g, ""))}
-                          placeholder="0"
-                          aria-label="Duration in days"
-                        />
-                        <span className={styles.durationSuffix}>days</span>
-                      </div>
-                    </div>
-                    <div className={styles.field}>
-                      <label className={styles.fieldLabel} htmlFor="bid-origin-port">Origin port</label>
-                      <input id="bid-origin-port" type="text" className={styles.input} value={bidOriginPort} onChange={(e) => setBidOriginPort(e.target.value)} placeholder="Port of loading" />
+                      <label className={styles.fieldLabel} htmlFor="bid-quotation-expires">
+                        Quotation expires (optional)
+                      </label>
+                      <input
+                        id="bid-quotation-expires"
+                        type="date"
+                        className={styles.input}
+                        value={bidQuotationExpiresAt}
+                        onChange={(e) => setBidQuotationExpiresAt(e.target.value)}
+                      />
                     </div>
                     <div className={styles.field}>
                       <label className={styles.fieldLabel} htmlFor="bid-destination-port">Destination port</label>
@@ -1947,7 +2487,19 @@ export function ShipmentDetail({ id }: { id: string }) {
                 </p>
               ) : (
                 <div className={styles.bidList}>
-                  {bids.map((bid) => (
+                  {bids.map((bid) => {
+                    const bidExpiryMeta = getForwarderQuotationExpiryMeta(
+                      bid.quotation_expires_at,
+                      bid.duration,
+                      bid.updated_at
+                    );
+                    const expiryDisplay =
+                      bid.quotation_expires_at?.trim()
+                        ? formatDayMonthYear(`${bid.quotation_expires_at.trim().slice(0, 10)}T12:00:00`)
+                        : bidExpiryMeta.expiresAt
+                          ? `${formatDayMonthYear(bidExpiryMeta.expiresAt.toISOString())} (legacy)`
+                          : "—";
+                    return (
                     <div key={bid.id} className={styles.bidCard}>
                       {editingBidId === bid.id ? (
                         <form onSubmit={handleSaveBid}>
@@ -1964,36 +2516,22 @@ export function ShipmentDetail({ id }: { id: string }) {
                                 autoComplete="off"
                                 className={styles.input}
                                 value={editBidServiceAmount}
-                                onChange={(e) => setEditBidServiceAmount(formatPriceInputWithCommas(e.target.value))}
+                                onChange={(e) => setEditBidServiceAmount(formatPriceInputWithCommas(e.target.value, 2))}
                                 placeholder="1,234.56"
                                 aria-label="Service amount"
                               />
                             </div>
                             <div className={styles.field}>
-                              <span className={styles.fieldLabel} id={`edit-bid-duration-label-${bid.id}`}>
-                                Duration
+                              <span className={styles.fieldLabel} id={`edit-bid-quotation-expires-label-${bid.id}`}>
+                                Quotation expires (optional)
                               </span>
-                              <div
-                                className={styles.durationFieldRow}
-                                role="group"
-                                aria-labelledby={`edit-bid-duration-label-${bid.id}`}
-                              >
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  autoComplete="off"
-                                  className={styles.input}
-                                  value={editBidDuration}
-                                  onChange={(e) => setEditBidDuration(e.target.value.replace(/\D/g, ""))}
-                                  placeholder="0"
-                                  aria-label="Duration in days"
-                                />
-                                <span className={styles.durationSuffix}>days</span>
-                              </div>
-                            </div>
-                            <div className={styles.field}>
-                              <span className={styles.fieldLabel}>Origin port</span>
-                              <input type="text" className={styles.input} value={editBidOriginPort} onChange={(e) => setEditBidOriginPort(e.target.value)} />
+                              <input
+                                type="date"
+                                className={styles.input}
+                                value={editBidQuotationExpiresAt}
+                                onChange={(e) => setEditBidQuotationExpiresAt(e.target.value)}
+                                aria-labelledby={`edit-bid-quotation-expires-label-${bid.id}`}
+                              />
                             </div>
                             <div className={styles.field}>
                               <span className={styles.fieldLabel}>Destination port</span>
@@ -2030,12 +2568,18 @@ export function ShipmentDetail({ id }: { id: string }) {
                               <span className={styles.fieldValue}>{bid.service_amount != null ? formatDecimal(bid.service_amount) : "—"}</span>
                             </div>
                             <div className={styles.field}>
-                              <span className={styles.fieldLabel}>Duration</span>
-                              <span className={styles.fieldValue}>{formatDurationDaysDisplay(bid.duration)}</span>
+                              <span className={styles.fieldLabel}>Quotation expires</span>
+                              <span className={styles.fieldValue}>{expiryDisplay}</span>
                             </div>
                             <div className={styles.field}>
-                              <span className={styles.fieldLabel}>Origin port</span>
-                              <span className={styles.fieldValue}>{display(bid.origin_port)}</span>
+                              <span className={styles.fieldLabel}>Origin port (lane)</span>
+                              <span className={styles.fieldValue}>
+                                {display(
+                                  (detail.origin_port_name ?? "").trim() ||
+                                    (bid.origin_port ?? "").trim() ||
+                                    null
+                                )}
+                              </span>
                             </div>
                             <div className={styles.field}>
                               <span className={styles.fieldLabel}>Destination port</span>
@@ -2072,7 +2616,8 @@ export function ShipmentDetail({ id }: { id: string }) {
                         </>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -2149,25 +2694,45 @@ export function ShipmentDetail({ id }: { id: string }) {
             <span className={styles.fieldLabel}>Vendor / supplier</span>
             <span className={styles.fieldValue}>{display(isUpdatingShipment ? editVendorName : detail.vendor_name)}</span>
           </div>
-          <div className={statusFieldClass("forwarder_name")} data-status-field="forwarder_name">
+          <div
+            id="field-forwarder-liner"
+            className={statusFieldClass("forwarder_name")}
+            data-status-field="forwarder_name"
+          >
             <span className={styles.fieldLabel}>Forwarder / liner</span>
             {isUpdatingShipment ? (
               hasBiddingStep ? (
-                <select
-                  className={styles.input}
-                  value={editForwarderName}
-                  onChange={(e) => setEditForwarderName(e.target.value)}
-                  disabled={forwarderOptionsFromBids.length === 0}
-                >
-                  <option value="">
-                    {forwarderOptionsFromBids.length === 0 ? "No forwarder from bidding yet" : "— Select forwarder —"}
-                  </option>
-                  {forwarderOptionsFromBids.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                <div className={styles.forwarderLinerPick}>
+                  <select
+                    className={styles.input}
+                    aria-label="Forwarder / liner source"
+                    value={editForwarderPick}
+                    onChange={(e) => handleForwarderPickChange(e.target.value)}
+                  >
+                    <option value="">— Select forwarder —</option>
+                    {bids.map((b) => (
+                      <option key={b.id} value={`bid:${b.id}`}>
+                        {b.forwarder_name.trim() || b.id}
+                      </option>
+                    ))}
+                    {recentForwarders.map((r, i) => (
+                      <option key={`recent-${r.shipment_id}-${i}`} value={`recent:${i}`}>
+                        Recent: {r.forwarder_name.trim() || "—"}
+                      </option>
+                    ))}
+                    <option value={FORWARDER_LINER_PICK_OTHER}>Other…</option>
+                  </select>
+                  {editForwarderPick === FORWARDER_LINER_PICK_OTHER ? (
+                    <input
+                      type="text"
+                      className={styles.input}
+                      value={editForwarderName}
+                      onChange={(e) => setEditForwarderName(e.target.value)}
+                      placeholder="Forwarder / liner name"
+                      aria-label="Forwarder / liner (other)"
+                    />
+                  ) : null}
+                </div>
               ) : (
                 <input
                   type="text"
@@ -2193,6 +2758,44 @@ export function ShipmentDetail({ id }: { id: string }) {
               />
             ) : (
               <span className={`${styles.fieldValue} ${styles.fieldValueMultiline}`}>{display(detail.warehouse_name)}</span>
+            )}
+          </div>
+        </div>
+
+        <h3 className={styles.subsectionTitle}>Origin port (port of loading)</h3>
+        <div className={styles.grid}>
+          <div className={statusFieldClass("origin_port_name")} data-status-field="origin_port_name">
+            <span className={styles.fieldLabel}>Origin port name</span>
+            {isUpdatingShipment ? (
+              <input
+                type="text"
+                className={styles.input}
+                value={hasBiddingStep ? biddingLanePort : editOriginPortName}
+                onChange={(e) =>
+                  hasBiddingStep ? setBiddingLanePort(e.target.value) : setEditOriginPortName(e.target.value)
+                }
+                placeholder="e.g. Port of Shanghai"
+                aria-label="Origin port name"
+              />
+            ) : (
+              <span className={styles.fieldValue}>{display(detail.origin_port_name)}</span>
+            )}
+          </div>
+          <div className={statusFieldClass("origin_port_country")} data-status-field="origin_port_country">
+            <span className={styles.fieldLabel}>Origin port country</span>
+            {isUpdatingShipment ? (
+              <ComboboxSelect
+                aria-label="Origin port country"
+                inputClassName={styles.input}
+                options={hasBiddingStep ? biddingLaneCountryOptions : originPortCountryOptions}
+                value={hasBiddingStep ? biddingLaneCountry : editOriginPortCountry}
+                onChange={hasBiddingStep ? setBiddingLaneCountry : setEditOriginPortCountry}
+                allowEmpty
+                emptyLabel="— Select country —"
+                placeholder="Type to search…"
+              />
+            ) : (
+              <span className={styles.fieldValue}>{display(detail.origin_port_country)}</span>
             )}
           </div>
         </div>
@@ -2240,7 +2843,7 @@ export function ShipmentDetail({ id }: { id: string }) {
               <span className={styles.fieldValue}>{formatYesNoOrLegacy(detail.kawasan_berikat)}</span>
             )}
           </div>
-          <div className={styles.field}>
+          <div className={statusFieldClass("surveyor")} data-status-field="surveyor">
             <span className={styles.fieldLabel}>Surveyor</span>
             {isUpdatingShipment ? (
               <select
@@ -2260,7 +2863,15 @@ export function ShipmentDetail({ id }: { id: string }) {
           <div className={statusFieldClass("shipment_method")} data-status-field="shipment_method">
             <span className={styles.fieldLabel}>Ship via (Sea / Air)</span>
             {isUpdatingShipment ? (
-              <select className={styles.input} value={editShipmentMethod} onChange={(e) => setEditShipmentMethod(e.target.value)}>
+              <select
+                className={styles.input}
+                value={editShipmentMethod}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEditShipmentMethod(v);
+                  if (v === "Air") handleShipByEditChange("");
+                }}
+              >
                 <option value="">— Select —</option>
                 <option value="Sea">Sea</option>
                 <option value="Air">Air</option>
@@ -2276,6 +2887,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                 className={styles.input}
                 value={editShipBy}
                 onChange={(e) => handleShipByEditChange(e.target.value)}
+                disabled={!isShipmentMethodSea(editShipmentMethod.trim() || detail.shipment_method)}
               >
                 <option value="">— Select —</option>
                 <option value="Bulk">Bulk</option>
@@ -2283,14 +2895,18 @@ export function ShipmentDetail({ id }: { id: string }) {
                 <option value="FCL">FCL</option>
               </select>
             ) : (
-              <span className={styles.fieldValue}>{display(detail.ship_by)}</span>
+              <span className={styles.fieldValue}>
+                {isShipmentMethodSea(detail.shipment_method) ? display(detail.ship_by) : "—"}
+              </span>
             )}
           </div>
           <div className={`${styles.field} ${styles.fieldUnitFull}`}>
             <span className={styles.fieldLabel}>Unit</span>
             {isUpdatingShipment ? (
               <div>
-                {!editShipBy ? (
+                {!isShipmentMethodSea(editShipmentMethod.trim() || detail.shipment_method) ? (
+                  <span className={styles.fieldValue}>—</span>
+                ) : !editShipBy ? (
                   <span className={styles.fieldHint}>Select Ship by to set units.</span>
                 ) : editShipBy === "Bulk" ? (
                   <span className={styles.fieldValue}>—</span>
@@ -2419,7 +3035,9 @@ export function ShipmentDetail({ id }: { id: string }) {
                 )}
               </div>
             ) : (
-              <span className={styles.fieldValue}>{formatShipmentUnits(detail)}</span>
+              <span className={styles.fieldValue}>
+                {isShipmentMethodSea(detail.shipment_method) ? formatShipmentUnits(detail) : "—"}
+              </span>
             )}
           </div>
           <div className={statusFieldClass("pib_type")} data-status-field="pib_type">
@@ -2427,8 +3045,8 @@ export function ShipmentDetail({ id }: { id: string }) {
             {isUpdatingShipment ? (
               <select className={styles.input} value={editPibType} onChange={(e) => setEditPibType(e.target.value)}>
                 <option value="">— Select —</option>
-                <option value="BC 23">BC 23</option>
-                <option value="BC 20">BC 20</option>
+                <option value="BC 2.3">BC 2.3</option>
+                <option value="BC 2.0">BC 2.0</option>
                 <option value="Consignment Note">Consignment Note</option>
               </select>
             ) : (
@@ -2459,14 +3077,6 @@ export function ShipmentDetail({ id }: { id: string }) {
               <span className={styles.fieldValue}>{formatDayMonthYear(detail.nopen_date)}</span>
             )}
           </div>
-          <div className={statusFieldClass("bl_awb")} data-status-field="bl_awb">
-            <span className={styles.fieldLabel}>BL/AWB</span>
-            {isUpdatingShipment ? (
-              <input type="text" className={styles.input} value={editBlAwb} onChange={(e) => setEditBlAwb(e.target.value)} />
-            ) : (
-              <span className={styles.fieldValue}>{display(detail.bl_awb)}</span>
-            )}
-          </div>
           <div className={styles.field}>
             <span className={styles.fieldLabel}>Insurance No</span>
             {isUpdatingShipment ? (
@@ -2485,41 +3095,19 @@ export function ShipmentDetail({ id }: { id: string }) {
           </div>
         </div>
 
-        <h3 className={styles.subsectionTitle}>Origin port (port of loading)</h3>
-        <div className={styles.grid}>
-          <div className={statusFieldClass("origin_port_name")} data-status-field="origin_port_name">
-            <span className={styles.fieldLabel}>Origin port name</span>
-            {isUpdatingShipment ? (
-              <input type="text" className={styles.input} value={editOriginPortName} onChange={(e) => setEditOriginPortName(e.target.value)} />
-            ) : (
-              <span className={styles.fieldValue}>{display(detail.origin_port_name)}</span>
-            )}
-          </div>
-          <div className={statusFieldClass("origin_port_country")} data-status-field="origin_port_country">
-            <span className={styles.fieldLabel}>Origin port country</span>
-            {isUpdatingShipment ? (
-              <ComboboxSelect
-                aria-label="Origin port country"
-                inputClassName={styles.input}
-                options={originPortCountryOptions}
-                value={editOriginPortCountry}
-                onChange={setEditOriginPortCountry}
-                allowEmpty
-                emptyLabel="— Select country —"
-                placeholder="Type to search…"
-              />
-            ) : (
-              <span className={styles.fieldValue}>{display(detail.origin_port_country)}</span>
-            )}
-          </div>
-        </div>
-
         <h3 className={styles.subsectionTitle}>ETD (estimated departure) &amp; ATD (actual departure)</h3>
         <div className={styles.grid}>
           <div className={statusFieldClass("etd")} data-status-field="etd">
             <span className={styles.fieldLabel}>ETD</span>
             {isUpdatingShipment ? (
-              <input type="date" className={styles.input} value={editEtd} onChange={(e) => setEditEtd(e.target.value)} />
+              <input
+                type="date"
+                className={styles.input}
+                value={editEtd}
+                max={editEta.trim() ? editEta.trim() : undefined}
+                onChange={(e) => setEditEtd(e.target.value)}
+                aria-label="ETD (must be before ETA when both set)"
+              />
             ) : (
               <span className={styles.fieldValue}>{formatDayMonthYear(detail.etd)}</span>
             )}
@@ -2537,6 +3125,25 @@ export function ShipmentDetail({ id }: { id: string }) {
 
       <Card id="section-on-shipment" className={`${styles.card} ${styles.sectionScrollTarget}`}>
         <h2 className={styles.categoryTitle}>On Shipment</h2>
+        <h3 className={styles.subsectionTitle}>BL / AWB &amp; PPJK/MKL</h3>
+        <div className={styles.grid}>
+          <div className={statusFieldClass("bl_awb")} data-status-field="bl_awb">
+            <span className={styles.fieldLabel}>BL/AWB</span>
+            {isUpdatingShipment ? (
+              <input type="text" className={styles.input} value={editBlAwb} onChange={(e) => setEditBlAwb(e.target.value)} />
+            ) : (
+              <span className={styles.fieldValue}>{display(detail.bl_awb)}</span>
+            )}
+          </div>
+          <div className={statusFieldClass("ppjk_mkl")} data-status-field="ppjk_mkl">
+            <span className={styles.fieldLabel}>PPJK/MKL</span>
+            {isUpdatingShipment ? (
+              <input type="text" className={styles.input} value={editPpjkMkl} onChange={(e) => setEditPpjkMkl(e.target.value)} />
+            ) : (
+              <span className={styles.fieldValue}>{display(detail.ppjk_mkl)}</span>
+            )}
+          </div>
+        </div>
         <h3 className={styles.subsectionTitle}>Destination port (port of discharge)</h3>
         <div className={styles.grid}>
           <div className={statusFieldClass("destination_port_name")} data-status-field="destination_port_name">
@@ -2591,7 +3198,14 @@ export function ShipmentDetail({ id }: { id: string }) {
           <div className={statusFieldClass("eta")} data-status-field="eta">
             <span className={styles.fieldLabel}>ETA</span>
             {isUpdatingShipment ? (
-              <input type="date" className={styles.input} value={editEta} onChange={(e) => setEditEta(e.target.value)} />
+              <input
+                type="date"
+                className={styles.input}
+                value={editEta}
+                min={editEtd.trim() ? editEtd.trim() : undefined}
+                onChange={(e) => setEditEta(e.target.value)}
+                aria-label="ETA (must be after ETD)"
+              />
             ) : (
               <span className={styles.fieldValue}>{formatDayMonthYear(detail.eta)}</span>
             )}
@@ -2612,7 +3226,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         <h3 className={styles.subsectionTitle}>Import duties (service, tax &amp; PDRI)</h3>
         <div className={styles.grid}>
           <div className={statusFieldClass("incoterm_amount")} data-status-field="incoterm_amount">
-            <span className={styles.fieldLabel}>Service &amp; charge (incoterm amount)</span>
+            <span className={styles.fieldLabel}>Freight charges</span>
             {isUpdatingShipment ? (
               <input
                 type="text"
@@ -2620,9 +3234,9 @@ export function ShipmentDetail({ id }: { id: string }) {
                 autoComplete="off"
                 className={styles.input}
                 value={editIncotermAmount}
-                onChange={(e) => setEditIncotermAmount(formatPriceInputWithCommas(e.target.value))}
+                onChange={(e) => setEditIncotermAmount(formatPriceInputWithCommas(e.target.value, 2))}
                 placeholder="1,234.56"
-                aria-label="Service and charge amount"
+                aria-label="Freight charges amount"
               />
             ) : (
               <span className={styles.fieldValue}>
@@ -2631,26 +3245,30 @@ export function ShipmentDetail({ id }: { id: string }) {
             )}
           </div>
           <div className={styles.field}>
-            <span className={styles.fieldLabel}>Total PO amount</span>
+            <span className={styles.fieldLabel}>Total Invoice amount</span>
             <span className={styles.fieldValue}>{formatRupiah(detail.total_items_amount)}</span>
           </div>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>CBM</span>
-            {isUpdatingShipment ? (
-              <input
-                type="number"
-                min={0}
-                step="0.000001"
-                className={styles.input}
-                value={editCbm}
-                onChange={(e) => setEditCbm(normalizeDecimalInput(e.target.value))}
-              />
-            ) : (
-              <span className={styles.fieldValue}>
-                {detail.cbm != null ? formatDecimal(detail.cbm) : "—"}
-              </span>
-            )}
-          </div>
+          {isShipmentMethodSea(isUpdatingShipment ? editShipmentMethod.trim() || detail.shipment_method : detail.shipment_method) &&
+          (isUpdatingShipment ? editShipBy : detail.ship_by)?.trim() === "LCL" ? (
+            <div className={styles.field}>
+              <span className={styles.fieldLabel}>CBM</span>
+              {isUpdatingShipment ? (
+                <input
+                  type="number"
+                  min={0}
+                  step="0.000001"
+                  className={styles.input}
+                  value={editCbm}
+                  onChange={(e) => setEditCbm(normalizeDecimalInput(e.target.value))}
+                  aria-label="CBM (cubic metres)"
+                />
+              ) : (
+                <span className={styles.fieldValue}>
+                  {detail.cbm != null ? formatDecimal(detail.cbm) : "—"}
+                </span>
+              )}
+            </div>
+          ) : null}
           <div className={styles.field}>
             <span className={styles.fieldLabel}>Net weight (MT)</span>
             {isUpdatingShipment ? (
@@ -2725,7 +3343,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                       className={styles.input}
                       value={primaryGroupedPo ? poEditCurrencyRateByIntake[primaryGroupedPo.intake_id] ?? "" : ""}
                       onChange={(e) => {
-                        const next = formatPriceInputWithCommas(e.target.value);
+                        const next = formatPriceInputWithCommas(e.target.value, 2);
                         setPoEditCurrencyRateByIntake(
                           Object.fromEntries(detail.linked_pos.map((po) => [po.intake_id, next] as const))
                         );
@@ -2743,8 +3361,16 @@ export function ShipmentDetail({ id }: { id: string }) {
               ) : null}
             </div>
           ) : null}
+          {dutyCalculationSkipped ? (
+            <p className={styles.fieldHint} role="note">
+              PIB type BC 2.3: BM, PPN, PPH, and PDRI are not calculated for this shipment.
+            </p>
+          ) : null}
           <div className={statusFieldClass("bm_percentage")} data-status-field="bm_percentage">
-            <span className={styles.fieldLabel}>BM percentage (%)</span>
+            <span className={styles.fieldLabel}>
+              BM percentage (%)
+              {dutyCalculationSkipped ? " — not used for BC 2.3" : ""}
+            </span>
             {isUpdatingShipment ? (
               <input
                 type="text"
@@ -2752,41 +3378,108 @@ export function ShipmentDetail({ id }: { id: string }) {
                 autoComplete="off"
                 className={styles.input}
                 value={editBmPercentage}
-                onChange={(e) => setEditBmPercentage(formatPriceInputWithCommas(e.target.value))}
-                placeholder="e.g. 7.5"
+                onChange={(e) => setEditBmPercentage(formatPriceInputWithCommas(e.target.value, 2))}
+                placeholder={dutyCalculationSkipped ? "N/A for BC 2.3" : "e.g. 7.5"}
                 aria-label="BM percentage"
+                disabled={dutyCalculationSkipped}
               />
             ) : (
-              <span className={styles.fieldValue}>{detail.bm_percentage != null ? `${formatDecimal(detail.bm_percentage)}%` : "—"}</span>
+              <span className={styles.fieldValue}>
+                {dutyCalculationSkipped ? "—" : detail.bm_percentage != null ? `${formatDecimal(detail.bm_percentage)}%` : "—"}
+              </span>
+            )}
+          </div>
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>PPN percentage (%)</span>
+            {isUpdatingShipment ? (
+              <input
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                className={styles.input}
+                value={editPpnPercentage}
+                onChange={(e) => setEditPpnPercentage(formatPriceInputWithCommas(e.target.value, 2))}
+                placeholder={
+                  dutyCalculationSkipped
+                    ? "N/A for BC 2.3"
+                    : `e.g. ${formatDecimal(detail.duty_percentage_defaults?.ppn ?? 11)} (system default if empty)`
+                }
+                aria-label="PPN percentage"
+                disabled={dutyCalculationSkipped}
+              />
+            ) : (
+              <span className={styles.fieldValue}>
+                {dutyCalculationSkipped
+                  ? "—"
+                  : detail.ppn_percentage != null
+                    ? `${formatDecimal(detail.ppn_percentage)}%`
+                    : `${formatDecimal(effectivePpnPct(detail))}% (system default)`}
+              </span>
+            )}
+          </div>
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>PPH percentage (%)</span>
+            {isUpdatingShipment ? (
+              <input
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                className={styles.input}
+                value={editPphPercentage}
+                onChange={(e) => setEditPphPercentage(formatPriceInputWithCommas(e.target.value, 2))}
+                placeholder={
+                  dutyCalculationSkipped
+                    ? "N/A for BC 2.3"
+                    : `e.g. ${formatDecimal(detail.duty_percentage_defaults?.pph ?? 2.5)} (system default if empty)`
+                }
+                aria-label="PPH percentage"
+                disabled={dutyCalculationSkipped}
+              />
+            ) : (
+              <span className={styles.fieldValue}>
+                {dutyCalculationSkipped
+                  ? "—"
+                  : detail.pph_percentage != null
+                    ? `${formatDecimal(detail.pph_percentage)}%`
+                    : `${formatDecimal(effectivePphPct(detail))}% (system default)`}
+              </span>
             )}
           </div>
           <div className={styles.field}>
             <span className={styles.dutyFieldLabelRow}>
               <span className={styles.fieldLabel}>BM (Bea Masuk)</span>
-              <DutyFormulaHint text={DUTY_FORMULA_BM} />
+              {!dutyCalculationSkipped ? <DutyFormulaHint text={DUTY_FORMULA_BM} /> : null}
             </span>
-            <span className={styles.fieldValue}>{formatRupiah(detail.bm)}</span>
+            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.bm)}</span>
           </div>
           <div className={styles.field}>
             <span className={styles.dutyFieldLabelRow}>
               <span className={styles.fieldLabel}>PPN</span>
-              <DutyFormulaHint text={`PPN = ${detail.ppn_percentage}% × (Total PO amount + BM).`} />
+              {!dutyCalculationSkipped ? (
+                <DutyFormulaHint
+                  text={`PPN = ${formatDecimal(effectivePpnPct(detail))}% × (Total Invoice amount + BM). Rate is the PPN percentage above, or the system default when that field is left empty.`}
+                />
+              ) : null}
             </span>
-            <span className={styles.fieldValue}>{formatRupiah(detail.ppn)}</span>
+            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.ppn)}</span>
           </div>
           <div className={styles.field}>
             <span className={styles.dutyFieldLabelRow}>
               <span className={styles.fieldLabel}>PPH</span>
-              <DutyFormulaHint text={`PPH = ${detail.pph_percentage}% × (Total PO amount + BM).`} />
+              {!dutyCalculationSkipped ? (
+                <DutyFormulaHint
+                  text={`PPH = ${formatDecimal(effectivePphPct(detail))}% × (Total Invoice amount + BM). Rate is the PPH percentage above, or the system default when that field is left empty.`}
+                />
+              ) : null}
             </span>
-            <span className={styles.fieldValue}>{formatRupiah(detail.pph)}</span>
+            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.pph)}</span>
           </div>
           <div className={styles.field}>
             <span className={styles.dutyFieldLabelRow}>
               <span className={styles.fieldLabel}>PDRI (Pajak Dalam Rangka Impor)</span>
-              <DutyFormulaHint text={DUTY_FORMULA_PDRI} />
+              {!dutyCalculationSkipped ? <DutyFormulaHint text={DUTY_FORMULA_PDRI} /> : null}
             </span>
-            <span className={styles.fieldValue}>{formatRupiah(detail.pdri)}</span>
+            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.pdri)}</span>
           </div>
         </div>
 

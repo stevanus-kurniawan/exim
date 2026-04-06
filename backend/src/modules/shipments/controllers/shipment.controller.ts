@@ -59,7 +59,7 @@ export async function create(req: Request, res: Response, next: NextFunction): P
     return;
   }
   try {
-    const data = await service.create(validation.data);
+    const data = await service.create(validation.data, actorFromRequest(req));
     sendSuccess(res, data, { message: "Shipment created successfully", statusCode: 201 });
   } catch (e) {
     next(e);
@@ -204,6 +204,34 @@ export async function updatePoLines(req: Request, res: Response, next: NextFunct
       return;
     }
     sendSuccess(res, data, { message: "Received quantities updated successfully" });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function downloadCombinedImportTemplate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const csv = service.getCombinedImportTemplateCsv();
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="monitoring-data-v2-template.csv"');
+    res.status(200).send(csv);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function importCombinedCsv(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const file = req.file as { buffer?: Buffer } | undefined;
+    const csvText = file?.buffer ? file.buffer.toString("utf8") : typeof req.body?.csv_text === "string" ? req.body.csv_text : "";
+    if (!csvText.trim()) {
+      sendError(res, "CSV file is required", { statusCode: 400 });
+      return;
+    }
+    const result = await service.importCombinedFromCsv(csvText);
+    sendSuccess(res, result, {
+      message: result.errors.length > 0 ? "Combined CSV imported with warnings" : "Combined CSV imported successfully",
+    });
   } catch (e) {
     next(e);
   }

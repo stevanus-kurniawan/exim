@@ -440,7 +440,7 @@ export function CreatePo() {
                             className={styles.itemsInput}
                             value={item.priceText}
                             onChange={(e) =>
-                              updateItem(index, "priceText", formatPriceInputWithCommas(e.target.value))
+                              updateItem(index, "priceText", formatPriceInputWithCommas(e.target.value, 2))
                             }
                             placeholder="1,234.56"
                             aria-label="Price per unit"

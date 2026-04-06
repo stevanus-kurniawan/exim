@@ -105,6 +105,7 @@ export interface ShipmentDetail {
   pic_name: string | null;
   pib_type: string | null;
   no_request_pib: string | null;
+  ppjk_mkl: string | null;
   nopen: string | null;
   nopen_date: string | null;
   ship_by: string | null;
@@ -132,15 +133,16 @@ export interface ShipmentDetail {
   package_count: number | null;
   /** FCL: 20′ ISO tank quantity when unit_20_iso_tank is true */
   container_count_20_iso_tank: number | null;
-  /** Total PO amount in IDR for this shipment: Σ((delivered_qty × unit_price) × currency_rate). */
+  /** Total invoice in IDR: linked POs share currency & rate — IDR/RP = Σ(qty×price); else Σ(qty×price) × group rate. */
   total_items_amount: number;
   /** BM = (bm_percentage / 100) × total_items_amount (system-calculated). */
   bm: number;
-  /** Effective PPN rate (%) from server (PPN_PERCENTAGE). */
-  ppn_percentage: number;
+  /** Shipment PPN %; null uses `duty_percentage_defaults.ppn` in calculations. */
+  ppn_percentage: number | null;
+  pph_percentage: number | null;
+  /** Env defaults when row PPN/PPH % are null. */
+  duty_percentage_defaults: { ppn: number; pph: number };
   ppn: number;
-  /** Effective PPH rate (%) from server (PPH_PERCENTAGE). */
-  pph_percentage: number;
   pph: number;
   /** PDRI = BM + PPN + PPH */
   pdri: number;
@@ -235,6 +237,8 @@ export interface ShipmentBid {
   forwarder_name: string;
   service_amount: number | null;
   duration: string | null;
+  /** Optional calendar expiry (YYYY-MM-DD) for quotation validity. */
+  quotation_expires_at?: string | null;
   origin_port: string | null;
   destination_port: string | null;
   ship_via: string | null;
@@ -243,3 +247,36 @@ export interface ShipmentBid {
   created_at: string;
   updated_at: string;
 }
+
+export interface RecentForwarderBid {
+  forwarder_name: string;
+  shipment_id: string;
+  duration: string | null;
+  quotation_expires_at?: string | null;
+  service_amount: number | null;
+  origin_port: string | null;
+  destination_port: string | null;
+  /** Origin port country on the past shipment that held this bid (matches current shipment’s origin country filter). */
+  origin_country: string | null;
+  /** Destination port country on that past shipment (informational). */
+  destination_country: string | null;
+  ship_via: string | null;
+  updated_at: string;
+}
+
+export interface ShipmentImportCsvErrorRow {
+  row: number;
+  field: string;
+  shipment_no: string;
+  po_number: string;
+  message: string;
+}
+
+export interface ShipmentImportCsvResult {
+  total_rows: number;
+  imported_shipments: number;
+  imported_rows: number;
+  failed_rows: number;
+  errors: ShipmentImportCsvErrorRow[];
+}
+

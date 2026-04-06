@@ -31,7 +31,7 @@ export class ShipmentRepository {
     incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
     destination_port_code, destination_port_name, destination_port_country, etd, eta, atd, ata, depo, depo_location, current_status,
     closed_at, close_reason, remarks, created_at, updated_at,
-    pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, net_weight_mt, gross_weight_mt, bm, bm_percentage, kawasan_berikat, surveyor,
+    pib_type, no_request_pib, ppjk_mkl, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, net_weight_mt, gross_weight_mt, bm, bm_percentage, ppn_percentage, pph_percentage, kawasan_berikat, surveyor,
     product_classification,
     unit_20ft, unit_40ft, unit_package, unit_20_iso_tank, container_count_20ft, container_count_40ft, package_count, container_count_20_iso_tank`;
 
@@ -44,9 +44,10 @@ export class ShipmentRepository {
         shipment_no, vendor_code, vendor_name, forwarder_code, forwarder_name, warehouse_code, warehouse_name,
         incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
         destination_port_code, destination_port_name, destination_port_country, etd, eta, remarks,
-        pib_type, no_request_pib, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, bm, bm_percentage, kawasan_berikat,
+        pib_type, no_request_pib, ppjk_mkl, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, bm, bm_percentage, ppn_percentage, pph_percentage, kawasan_berikat,
+        product_classification,
         current_status, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, 'INITIATE_SHIPPING_DOCUMENT', NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, 'INITIATE_SHIPPING_DOCUMENT', NOW(), NOW())
       RETURNING ${this.selectColumns}`,
       [
         shipmentNo,
@@ -69,6 +70,7 @@ export class ShipmentRepository {
         dto.remarks ?? null,
         dto.pib_type ?? null,
         dto.no_request_pib ?? null,
+        dto.ppjk_mkl ?? null,
         dto.nopen ?? null,
         nopenDate,
         dto.ship_by ?? null,
@@ -79,7 +81,10 @@ export class ShipmentRepository {
         dto.cbm ?? null,
         null,
         dto.bm_percentage ?? null,
+        dto.ppn_percentage ?? null,
+        dto.pph_percentage ?? null,
         dto.kawasan_berikat ?? null,
+        dto.product_classification ?? null,
       ]
     );
     if (!result.rows[0]) throw new Error("ShipmentRepository.create: no row returned");
@@ -90,6 +95,14 @@ export class ShipmentRepository {
     const result = await this.pool.query<ShipmentRow>(
       `SELECT ${this.selectColumns} FROM shipments WHERE id = $1`,
       [id]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findByShipmentNo(shipmentNo: string): Promise<ShipmentRow | null> {
+    const result = await this.pool.query<ShipmentRow>(
+      `SELECT ${this.selectColumns} FROM shipments WHERE LOWER(TRIM(shipment_no)) = LOWER(TRIM($1)) LIMIT 1`,
+      [shipmentNo]
     );
     return result.rows[0] ?? null;
   }
@@ -177,8 +190,8 @@ export class ShipmentRepository {
         s.origin_port_code, s.origin_port_name, s.origin_port_country,
         s.destination_port_code, s.destination_port_name, s.destination_port_country,
         s.etd, s.eta, s.atd, s.ata, s.depo, s.depo_location, s.current_status, s.closed_at, s.close_reason, s.remarks, s.created_at, s.updated_at,
-        s.pib_type, s.no_request_pib, s.nopen, s.nopen_date, s.ship_by, s.bl_awb, s.insurance_no, s.coo,
-        s.incoterm_amount, s.cbm, s.net_weight_mt, s.gross_weight_mt, s.bm, s.bm_percentage, s.kawasan_berikat, s.surveyor, s.product_classification,
+        s.pib_type, s.no_request_pib, s.ppjk_mkl, s.nopen, s.nopen_date, s.ship_by, s.bl_awb, s.insurance_no, s.coo,
+        s.incoterm_amount, s.cbm, s.net_weight_mt, s.gross_weight_mt, s.bm, s.bm_percentage, s.ppn_percentage, s.pph_percentage, s.kawasan_berikat, s.surveyor, s.product_classification,
         s.unit_20ft, s.unit_40ft, s.unit_package, s.unit_20_iso_tank, s.container_count_20ft, s.container_count_40ft,
         s.package_count, s.container_count_20_iso_tank
        FROM shipments s WHERE ${where} ORDER BY s.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
@@ -234,6 +247,10 @@ export class ShipmentRepository {
       updates.push(`no_request_pib = $${idx++}`);
       params.push(dto.no_request_pib);
     }
+    if (dto.ppjk_mkl !== undefined) {
+      updates.push(`ppjk_mkl = $${idx++}`);
+      params.push(dto.ppjk_mkl);
+    }
     if (dto.nopen !== undefined) {
       updates.push(`nopen = $${idx++}`);
       params.push(dto.nopen);
@@ -277,6 +294,14 @@ export class ShipmentRepository {
     if (dto.bm_percentage !== undefined) {
       updates.push(`bm_percentage = $${idx++}`);
       params.push(dto.bm_percentage);
+    }
+    if (dto.ppn_percentage !== undefined) {
+      updates.push(`ppn_percentage = $${idx++}`);
+      params.push(dto.ppn_percentage);
+    }
+    if (dto.pph_percentage !== undefined) {
+      updates.push(`pph_percentage = $${idx++}`);
+      params.push(dto.pph_percentage);
     }
     if (dto.origin_port_name !== undefined) {
       updates.push(`origin_port_name = $${idx++}`);
@@ -412,3 +437,4 @@ export class ShipmentRepository {
     await this.pool.query(`UPDATE shipments SET bm = $1, updated_at = NOW() WHERE id = $2`, [bm, id]);
   }
 }
+

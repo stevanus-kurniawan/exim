@@ -35,6 +35,7 @@ export interface CreateShipmentDto {
   remarks?: string;
   pib_type?: string;
   no_request_pib?: string;
+  ppjk_mkl?: string;
   nopen?: string;
   nopen_date?: string;
   ship_by?: string;
@@ -42,8 +43,12 @@ export interface CreateShipmentDto {
   insurance_no?: string;
   coo?: string;
   incoterm_amount?: number;
-  cbm?: number;
+  cbm?: number | null;
   bm_percentage?: number;
+  /** PPN % of (total invoice + BM); omit/null uses env default. */
+  ppn_percentage?: number | null;
+  /** PPH % of (total invoice + BM); omit/null uses env default. */
+  pph_percentage?: number | null;
   kawasan_berikat?: string;
   product_classification?: string;
 }
@@ -58,17 +63,21 @@ export interface UpdateShipmentDto {
   remarks?: string;
   pib_type?: string;
   no_request_pib?: string;
+  ppjk_mkl?: string;
   nopen?: string;
   nopen_date?: string;
-  ship_by?: string;
+  /** Null clears ship_by (e.g. when Ship via is Air). */
+  ship_by?: string | null;
   bl_awb?: string;
   insurance_no?: string;
   coo?: string;
   incoterm_amount?: number;
-  cbm?: number;
+  cbm?: number | null;
   net_weight_mt?: number;
   gross_weight_mt?: number;
   bm_percentage?: number;
+  ppn_percentage?: number | null;
+  pph_percentage?: number | null;
   origin_port_name?: string;
   origin_port_country?: string;
   forwarder_name?: string;
@@ -171,6 +180,7 @@ export interface ShipmentRow {
   updated_at: Date;
   pib_type: string | null;
   no_request_pib: string | null;
+  ppjk_mkl: string | null;
   nopen: string | null;
   nopen_date: Date | null;
   ship_by: string | null;
@@ -183,6 +193,8 @@ export interface ShipmentRow {
   gross_weight_mt: number | null;
   bm: number | null;
   bm_percentage: number | null;
+  ppn_percentage: number | null;
+  pph_percentage: number | null;
   kawasan_berikat: string | null;
   surveyor: string | null;
   product_classification: string | null;
@@ -258,6 +270,7 @@ export interface ShipmentDetail {
   pic_name: string | null;
   pib_type: string | null;
   no_request_pib: string | null;
+  ppjk_mkl: string | null;
   nopen: string | null;
   nopen_date: string | null;
   ship_by: string | null;
@@ -280,17 +293,19 @@ export interface ShipmentDetail {
   container_count_40ft: number | null;
   package_count: number | null;
   container_count_20_iso_tank: number | null;
-  /** Sum in IDR for this shipment: Σ((delivered_qty × unit_price) × currency_rate). */
+  /** Sum in IDR: all linked POs share currency & rate — IDR/RP = Σ(qty×price); else Σ(qty×price) × group currency_rate. */
   total_items_amount: number;
   /** BM = (bm_percentage / 100) × total_items_amount (system-calculated). */
   bm: number;
-  /** Effective PPN rate (percent) from server config (PPN_PERCENTAGE). */
-  ppn_percentage: number;
-  /** PPN = (ppn_percentage / 100) × (total_items_amount + BM). */
+  /** Shipment-specific PPN %; null means `duty_percentage_defaults.ppn` is used in formulas. */
+  ppn_percentage: number | null;
+  /** Shipment-specific PPH %; null means `duty_percentage_defaults.pph` is used in formulas. */
+  pph_percentage: number | null;
+  /** Env-based defaults when row PPN/PPH % are null (read-only). */
+  duty_percentage_defaults: { ppn: number; pph: number };
+  /** PPN = (effective PPN %) / 100 × (total_items_amount + BM). */
   ppn: number;
-  /** Effective PPH rate (percent) from server config (PPH_PERCENTAGE). */
-  pph_percentage: number;
-  /** PPH = (pph_percentage / 100) × (total_items_amount + BM). */
+  /** PPH = (effective PPH %) / 100 × (total_items_amount + BM). */
   pph: number;
   /** PDRI = BM + PPN + PPH */
   pdri: number;
@@ -409,6 +424,8 @@ export interface ShipmentBidRow {
   forwarder_name: string;
   service_amount: number | null;
   duration: string | null;
+  /** Calendar expiry for quotation validity (optional). */
+  quotation_expires_at: Date | null;
   origin_port: string | null;
   destination_port: string | null;
   ship_via: string | null;
@@ -422,6 +439,8 @@ export interface CreateShipmentBidDto {
   forwarder_name: string;
   service_amount?: number;
   duration?: string;
+  /** YYYY-MM-DD; optional. */
+  quotation_expires_at?: string | null;
   origin_port?: string;
   destination_port?: string;
   ship_via?: string;
@@ -431,9 +450,27 @@ export interface UpdateShipmentBidDto {
   forwarder_name?: string;
   service_amount?: number;
   duration?: string;
+  quotation_expires_at?: string | null;
   origin_port?: string;
   destination_port?: string;
   ship_via?: string;
   quotation_file_name?: string;
   quotation_storage_key?: string;
 }
+
+export interface ShipmentCsvImportErrorRow {
+  row: number;
+  field: string;
+  shipment_no: string;
+  po_number: string;
+  message: string;
+}
+
+export interface ShipmentCsvImportResult {
+  total_rows: number;
+  imported_shipments: number;
+  imported_rows: number;
+  failed_rows: number;
+  errors: ShipmentCsvImportErrorRow[];
+}
+

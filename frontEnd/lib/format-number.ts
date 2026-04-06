@@ -28,8 +28,9 @@ export function stripCommaThousands(s: string): string {
 
 /**
  * Normalize price input: digits, optional single decimal, with comma as thousands separator (en-US style).
+ * @param maxFractionDigits when set, caps digits after the decimal (e.g. 2 for money fields).
  */
-export function formatPriceInputWithCommas(raw: string): string {
+export function formatPriceInputWithCommas(raw: string, maxFractionDigits?: number): string {
   const noComma = stripCommaThousands(raw);
   if (noComma === "") return "";
 
@@ -46,7 +47,10 @@ export function formatPriceInputWithCommas(raw: string): string {
 
   const parts = cleaned.split(".");
   const intRaw = parts[0] ?? "";
-  const frac = parts.slice(1).join("").replace(/\./g, "");
+  let frac = parts.slice(1).join("").replace(/\./g, "");
+  if (maxFractionDigits != null && maxFractionDigits >= 0) {
+    frac = frac.slice(0, maxFractionDigits);
+  }
 
   if (intRaw === "" && frac === "") {
     return dotSeen ? "." : "";

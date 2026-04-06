@@ -13,12 +13,20 @@ const bidRepo = new ShipmentBidRepository();
 const shipmentRepo = new ShipmentRepository();
 const storage = new LocalStorageAdapter();
 
+function quotationExpiresAtToYmd(value: Date | string | null | undefined): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "string") return value.slice(0, 10);
+  return null;
+}
+
 function toBidResponse(row: {
   id: string;
   shipment_id: string;
   forwarder_name: string;
   service_amount: number | null;
   duration: string | null;
+  quotation_expires_at: Date | string | null;
   origin_port: string | null;
   destination_port: string | null;
   ship_via: string | null;
@@ -33,6 +41,7 @@ function toBidResponse(row: {
     forwarder_name: row.forwarder_name,
     service_amount: row.service_amount,
     duration: row.duration,
+    quotation_expires_at: quotationExpiresAtToYmd(row.quotation_expires_at),
     origin_port: row.origin_port,
     destination_port: row.destination_port,
     ship_via: row.ship_via,
@@ -59,6 +68,44 @@ export async function listBids(req: Request, res: Response, next: NextFunction):
   }
 }
 
+/** Latest bid snapshot per forwarder: same origin port country as the given shipment, quotation still valid. */
+export async function listRecentForwarders(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const raw = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 20;
+  const limit = Number.isFinite(raw) ? raw : 20;
+  const shipmentId = typeof req.query.shipment_id === "string" ? req.query.shipment_id.trim() : "";
+  if (!shipmentId) {
+    sendError(res, "shipment_id query parameter is required", { statusCode: 400 });
+    return;
+  }
+  try {
+    const shipment = await shipmentRepo.findById(shipmentId);
+    if (!shipment) {
+      sendError(res, "Shipment not found", { statusCode: 404 });
+      return;
+    }
+    const qOrigin =
+      typeof req.query.origin_port_country === "string" ? req.query.origin_port_country.trim() : "";
+    const originFilter = qOrigin || (shipment.origin_port_country ?? "").trim();
+    const rows = await bidRepo.findRecentForwarders(limit, originFilter, shipmentId);
+    const data = rows.map((row) => ({
+      forwarder_name: row.forwarder_name,
+      shipment_id: row.shipment_id,
+      duration: row.duration,
+      quotation_expires_at: quotationExpiresAtToYmd(row.quotation_expires_at),
+      service_amount: row.service_amount,
+      origin_port: row.origin_port,
+      destination_port: row.destination_port,
+      origin_country: row.origin_country,
+      destination_country: row.destination_country,
+      ship_via: row.ship_via,
+      updated_at: row.updated_at.toISOString(),
+    }));
+    sendSuccess(res, data);
+  } catch (e) {
+    next(e);
+  }
+}
+
 export async function createBid(req: Request, res: Response, next: NextFunction): Promise<void> {
   const shipmentId = req.params.id as string;
   const validation = validateCreateBidBody(req);
@@ -72,7 +119,11 @@ export async function createBid(req: Request, res: Response, next: NextFunction)
       sendError(res, "Shipment not found", { statusCode: 404 });
       return;
     }
-    const row = await bidRepo.create(shipmentId, validation.data);
+    const dto = { ...validation.data };
+    if ((dto.origin_port == null || dto.origin_port === "") && shipment.origin_port_name?.trim()) {
+      dto.origin_port = shipment.origin_port_name.trim();
+    }
+    const row = await bidRepo.create(shipmentId, dto);
     sendSuccess(res, toBidResponse(row), { message: "Bid added successfully", statusCode: 201 });
   } catch (e) {
     next(e);

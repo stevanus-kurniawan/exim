@@ -1,12 +1,17 @@
-export interface ProductSpecificationSummaryItem {
-  product_specification: string;
-  vendor_name: string | null;
+/** GET /dashboard/delivered-management — one row per delivered shipment in the period. */
+export interface DeliveredManagementItem {
+  shipment_id: string;
+  shipment_number: string;
   pt: string | null;
   plant: string | null;
-  delivered_qty: number;
+  product_classification: string | null;
+  vendor_name: string | null;
+  total_amount_idr: number;
+  freight_charge: number | null;
+  total_qty: number;
 }
 
-export interface ProductSpecificationSummaryQuery {
+export interface DeliveredManagementQuery {
   month?: number;
   year?: number;
 }
