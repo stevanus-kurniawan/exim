@@ -15,3 +15,12 @@ export function normalizeProductClassificationForApi(value: string | null | unde
   if (!v) return null;
   return LEGACY_TO_CURRENT[v] ?? v;
 }
+
+/** DB values that match a UI filter (canonical Chemical / Package include legacy spellings). */
+export function classificationFilterSqlVariants(filterCanonical: string): string[] {
+  const t = filterCanonical.trim();
+  if (t === "Chemical") return ["Chemical", "Checmical"];
+  if (t === "Package") return ["Package", "Packaging"];
+  if (t === "") return [];
+  return [t];
+}

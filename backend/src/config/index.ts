@@ -66,6 +66,14 @@ export const config = {
     /** Base URL of frontend for verification and reset links (e.g. http://localhost:3000). */
     frontendBaseUrl: getEnvOptional("FRONTEND_BASE_URL", "http://localhost:3000") ?? "http://localhost:3000",
   },
+  /** IDR per 1 USD for dashboard procurement report (PO lines in IDR → US$). Optional; default 16500. */
+  dashboard: {
+    idrPerUsd: (() => {
+      const raw = getEnvOptional("DASHBOARD_IDR_PER_USD", "16500") ?? "16500";
+      const n = parseFloat(raw);
+      return Number.isFinite(n) && n > 0 ? n : 16500;
+    })(),
+  },
   smtp: {
     host: getEnvOptional("SMTP_HOST", "localhost"),
     port: (() => {

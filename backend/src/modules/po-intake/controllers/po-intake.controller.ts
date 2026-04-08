@@ -4,7 +4,11 @@
 
 import type { Request, Response, NextFunction } from "express";
 import { sendSuccess, sendError } from "../../../shared/response.js";
-import { validateCreateIntakeBody, validateCoupleToShipmentBody } from "../validators/index.js";
+import {
+  validateCreateIntakeBody,
+  validateCoupleToShipmentBody,
+  validateUpdatePoIntakeBody,
+} from "../validators/index.js";
 import { PoIntakeService } from "../services/po-intake.service.js";
 import { PoIntakeRepository } from "../repositories/po-intake.repository.js";
 import { ShipmentService } from "../../shipments/services/shipment.service.js";
@@ -40,7 +44,8 @@ export async function create(req: Request, res: Response, next: NextFunction): P
     return;
   }
   try {
-    const data = await service.create(validation.data);
+    const createdByUserId = req.user?.id ?? null;
+    const data = await service.create(validation.data, { createdByUserId });
     sendSuccess(res, data, { message: "PO intake created successfully", statusCode: 201 });
   } catch (e) {
     next(e);
@@ -87,6 +92,30 @@ export async function getById(req: Request, res: Response, next: NextFunction): 
       return;
     }
     sendSuccess(res, data);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function updateIntake(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const id = req.params.id as string;
+  const validation = validateUpdatePoIntakeBody(req);
+  if (!validation.ok) {
+    sendError(res, "Validation error", { errors: validation.errors, statusCode: 400 });
+    return;
+  }
+  try {
+    const actorName =
+      req.user?.name?.trim() ||
+      req.user?.email?.trim() ||
+      (req.user?.id != null ? String(req.user.id) : "") ||
+      "Unknown";
+    const detail = await service.updateIntake(id, validation.data, actorName);
+    if (!detail) {
+      sendError(res, "PO intake not found", { statusCode: 404 });
+      return;
+    }
+    sendSuccess(res, detail, { message: "Purchase Order updated" });
   } catch (e) {
     next(e);
   }
@@ -190,7 +219,8 @@ export async function importCsv(req: Request, res: Response, next: NextFunction)
       return;
     }
     const actorName = req.user?.name ?? req.user?.id ?? "system";
-    const result = await service.importFromCsv(csvText, actorName, file?.originalname ?? null);
+    const createdByUserId = req.user?.id ?? null;
+    const result = await service.importFromCsv(csvText, actorName, file?.originalname ?? null, createdByUserId);
     sendSuccess(res, result, {
       message: result.errors.length > 0 ? "CSV imported with warnings" : "CSV imported successfully",
       statusCode: 200,

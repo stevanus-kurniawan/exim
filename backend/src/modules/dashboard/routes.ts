@@ -12,6 +12,36 @@ dashboardRoutes.get(
   requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
   dashboardController.getDeliveredManagementSummary
 );
+dashboardRoutes.get(
+  "/delivered-by-pt-plant",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  dashboardController.getDeliveredByPtPlantAgg
+);
+dashboardRoutes.get(
+  "/delivered-by-classification",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  dashboardController.getDeliveredByClassificationAgg
+);
+dashboardRoutes.get(
+  "/procurement-plant-report",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  dashboardController.getProcurementPlantReport
+);
+dashboardRoutes.get(
+  "/shipment-analytics",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  dashboardController.getShipmentAnalytics
+);
+dashboardRoutes.get(
+  "/shipment-analytics/lines",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  dashboardController.getShipmentAnalyticsLines
+);
 /** @deprecated Use GET /dashboard/delivered-management — same response shape. */
 dashboardRoutes.get(
   "/product-specification-summary",

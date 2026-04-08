@@ -1426,6 +1426,7 @@ export function ShipmentDetail({ id }: { id: string }) {
             line_received = items.map((it) => ({
               item_id: it.id,
               received_qty: parseDeliveredQtyInput(qtyDraft[it.id] ?? ""),
+              item_description: it.item_description ?? null,
             }));
           } else if (line_received && line_received.length > 0) {
             line_received = line_received.map((l) => ({
@@ -3125,7 +3126,7 @@ export function ShipmentDetail({ id }: { id: string }) {
 
       <Card id="section-on-shipment" className={`${styles.card} ${styles.sectionScrollTarget}`}>
         <h2 className={styles.categoryTitle}>On Shipment</h2>
-        <h3 className={styles.subsectionTitle}>BL / AWB &amp; PPJK/MKL</h3>
+        <h3 className={styles.subsectionTitle}>BL / AWB &amp; PPJK/EMKL</h3>
         <div className={styles.grid}>
           <div className={statusFieldClass("bl_awb")} data-status-field="bl_awb">
             <span className={styles.fieldLabel}>BL/AWB</span>
@@ -3136,7 +3137,7 @@ export function ShipmentDetail({ id }: { id: string }) {
             )}
           </div>
           <div className={statusFieldClass("ppjk_mkl")} data-status-field="ppjk_mkl">
-            <span className={styles.fieldLabel}>PPJK/MKL</span>
+            <span className={styles.fieldLabel}>PPJK/EMKL</span>
             {isUpdatingShipment ? (
               <input type="text" className={styles.input} value={editPpjkMkl} onChange={(e) => setEditPpjkMkl(e.target.value)} />
             ) : (
@@ -3938,6 +3939,9 @@ export function ShipmentDetail({ id }: { id: string }) {
                               <span className={styles.shipmentDocStatusLabel}>PO {display(po.po_number)}</span>
                               {canUploadDocument && (
                                 <label className={styles.shipmentDocUploadLabel}>
+                                  <span className={styles.shipmentDocUploadBtn}>
+                                    {uploadingDocSlotKey === slotKey ? "Uploading…" : "Upload"}
+                                  </span>
                                   <input
                                     type="file"
                                     className={styles.shipmentDocFileInput}
@@ -3949,9 +3953,6 @@ export function ShipmentDetail({ id }: { id: string }) {
                                       e.target.value = "";
                                     }}
                                   />
-                                  <span className={styles.shipmentDocUploadBtn}>
-                                    {uploadingDocSlotKey === slotKey ? "Uploading…" : "Upload"}
-                                  </span>
                                 </label>
                               )}
                             </div>
@@ -3987,6 +3988,9 @@ export function ShipmentDetail({ id }: { id: string }) {
                           <span className={styles.shipmentDocStatusLabel}>{st === "DRAFT" ? "Draft" : "Final"}</span>
                           {canUploadDocument && (
                             <label className={styles.shipmentDocUploadLabel}>
+                              <span className={styles.shipmentDocUploadBtn}>
+                                {uploadingDocSlotKey === slotKey ? "Uploading…" : "Upload"}
+                              </span>
                               <input
                                 type="file"
                                 className={styles.shipmentDocFileInput}
@@ -3998,9 +4002,6 @@ export function ShipmentDetail({ id }: { id: string }) {
                                   e.target.value = "";
                                 }}
                               />
-                              <span className={styles.shipmentDocUploadBtn}>
-                                {uploadingDocSlotKey === slotKey ? "Uploading…" : "Upload"}
-                              </span>
                             </label>
                           )}
                         </div>
@@ -4015,6 +4016,9 @@ export function ShipmentDetail({ id }: { id: string }) {
                     <span className={styles.shipmentDocStatusLabel}>Files</span>
                     {canUploadDocument && (
                       <label className={styles.shipmentDocUploadLabel}>
+                        <span className={styles.shipmentDocUploadBtn}>
+                          {uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) ? "Uploading…" : "Upload"}
+                        </span>
                         <input
                           type="file"
                           className={styles.shipmentDocFileInput}
@@ -4028,9 +4032,6 @@ export function ShipmentDetail({ id }: { id: string }) {
                             e.target.value = "";
                           }}
                         />
-                        <span className={styles.shipmentDocUploadBtn}>
-                          {uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) ? "Uploading…" : "Upload"}
-                        </span>
                       </label>
                     )}
                   </div>

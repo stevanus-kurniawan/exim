@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+/** Avoid stale dashboard/report data when query string (month, year, etc.) changes. */
+export const dynamic = "force-dynamic";
+
 /** Backend routes live under this prefix (matches Express app). */
 const API_V1_PREFIX = "/api/v1";
 
@@ -68,7 +71,12 @@ async function proxy(req: NextRequest, pathSegments: string[]): Promise<NextResp
 
   let upstream: Response;
   try {
-    upstream = await fetch(target, { method, headers, body: body?.byteLength ? body : undefined });
+    upstream = await fetch(target, {
+      method,
+      headers,
+      body: body?.byteLength ? body : undefined,
+      cache: "no-store",
+    });
   } catch {
     return NextResponse.json(
       { success: false, message: "Could not reach backend (BACKEND_INTERNAL_URL)." },

@@ -3,6 +3,8 @@
  */
 
 import { PoIntakeRepository } from "../repositories/po-intake.repository.js";
+import { PoIntakeUpdateLogRepository } from "../repositories/po-intake-update-log.repository.js";
+import { buildPoIntakeUpdateDiff } from "../utils/po-intake-update-diff.js";
 import { ShipmentPoLineReceivedRepository } from "../../shipments/repositories/shipment-po-line-received.repository.js";
 import type { LinkedShipmentByIntake } from "../../shipments/repositories/shipment-po-mapping.repository.js";
 import type { UserRepository } from "../../auth/repositories/user.repository.js";
@@ -19,7 +21,9 @@ import type {
   PoIntakeListItem,
   PoIntakeDetail,
   CreatePoIntakeResponse,
+  UpdatePoIntakeDto,
 } from "../dto/index.js";
+import { anyLinkedShipmentBlocksPoEdit } from "../utils/po-intake-shipment-lock.js";
 
 type ImportCsvRow = {
   row: number;
@@ -169,12 +173,18 @@ async function buildDetail(
     linkedShipments.map(async (s) => {
       const lineRows = await lineReceivedRepo.findByShipmentAndIntake(s.shipment_id, row.id);
       const byItemId = new Map(lineRows.map((r) => [r.item_id, r.received_qty]));
-      const lines_received = items.map((it) => ({
-        item_id: it.id,
-        line_number: it.line_number,
-        item_description: it.item_description,
-        received_qty: byItemId.get(it.id) ?? 0,
-      }));
+      const descByItemId = new Map(lineRows.map((r) => [r.item_id, r.item_description]));
+      const lines_received = items.map((it) => {
+        const stored = descByItemId.get(it.id);
+        const desc =
+          stored != null && String(stored).trim() !== "" ? stored : it.item_description;
+        return {
+          item_id: it.id,
+          line_number: it.line_number,
+          item_description: desc,
+          received_qty: byItemId.get(it.id) ?? 0,
+        };
+      });
       return {
         shipment_id: s.shipment_id,
         shipment_number: s.shipment_number,
@@ -215,6 +225,7 @@ async function buildDetail(
 
 export class PoIntakeService {
   private readonly lineReceivedRepo = new ShipmentPoLineReceivedRepository();
+  private readonly updateLogRepo = new PoIntakeUpdateLogRepository();
 
   constructor(
     private readonly repo: PoIntakeRepository,
@@ -223,7 +234,10 @@ export class PoIntakeService {
   ) {}
 
   /** Create intake (ingestion or test-create). Prevents duplicate by external_id. */
-  async create(dto: CreatePoIntakeDto, options?: { skipDuplicateCheck?: boolean }): Promise<CreatePoIntakeResponse> {
+  async create(
+    dto: CreatePoIntakeDto,
+    options?: { skipDuplicateCheck?: boolean; createdByUserId?: string | null }
+  ): Promise<CreatePoIntakeResponse> {
     if (!options?.skipDuplicateCheck) {
       const exists = await this.repo.existsByExternalId(dto.external_id);
       if (exists) {
@@ -234,7 +248,7 @@ export class PoIntakeService {
     if (dupPo) {
       throw new AppError("Purchase Order number already exists. PO numbers must be unique.", 409);
     }
-    const row = await this.repo.create(dto, "NEW_PO_DETECTED");
+    const row = await this.repo.create(dto, "NEW_PO_DETECTED", options?.createdByUserId);
     await this.repo.insertItems(row.id, dto.items);
     return {
       id: row.id,
@@ -245,6 +259,96 @@ export class PoIntakeService {
     };
   }
 
+  /**
+   * Update PO header and lines. Blocked when any linked shipment is Ready Pickup or later.
+   * Lines with shipment delivery data cannot be removed.
+   */
+  async updateIntake(id: string, dto: UpdatePoIntakeDto, changedBy?: string): Promise<PoIntakeDetail | null> {
+    const row = await this.repo.findById(id);
+    if (!row) return null;
+
+    const beforeItems = await this.repo.findItemsByIntakeId(id);
+
+    const linked = this.mappingRepo ? await this.mappingRepo.findActiveShipmentsByIntakeId(id) : [];
+    if (anyLinkedShipmentBlocksPoEdit(linked)) {
+      throw new AppError(
+        "This Purchase Order cannot be edited while a linked shipment is at Ready Pickup, Picked Up, On Shipment, Customs Clearance, or Delivered.",
+        409
+      );
+    }
+
+    const dupPo = await this.repo.existsByPoNumberTrimmedExcludingId(dto.po_number, id);
+    if (dupPo) {
+      throw new AppError("Purchase Order number already exists. PO numbers must be unique.", 409);
+    }
+
+    const existingIds = await this.repo.listItemIdsForIntake(id);
+    const payloadIds = new Set(dto.items.map((it) => it.id).filter((x): x is string => Boolean(x)));
+
+    for (const existingId of existingIds) {
+      if (!payloadIds.has(existingId)) {
+        const { deleted, blocked } = await this.repo.tryDeleteItemIfNoLineReceived(id, existingId);
+        if (blocked) {
+          throw new AppError(
+            "Cannot remove a line that has shipment delivery quantities recorded.",
+            400
+          );
+        }
+        if (!deleted) {
+          throw new AppError("Failed to remove PO line", 500);
+        }
+      }
+    }
+
+    await this.repo.updateIntakeHeader(id, dto);
+
+    const idsAfterDeletes = new Set(await this.repo.listItemIdsForIntake(id));
+    for (let i = 0; i < dto.items.length; i++) {
+      const it = dto.items[i]!;
+      const lineNumber = i + 1;
+      if (it.id) {
+        if (!idsAfterDeletes.has(it.id)) {
+          throw new AppError(`Unknown PO line id: ${it.id}`, 400);
+        }
+        const ok = await this.repo.updateItemRow(
+          id,
+          it.id,
+          lineNumber,
+          it.item_description,
+          it.qty,
+          it.unit,
+          it.value
+        );
+        if (!ok) throw new AppError("Failed to update PO line", 500);
+      } else {
+        await this.repo.insertSingleItem(id, lineNumber, it.item_description, it.qty, it.unit, it.value);
+      }
+    }
+
+    await this.repo.recomputeTotalAmountPo(id);
+    const { overshipped } = await syncPoIntakeStatus(id);
+    const updated = await this.repo.findById(id);
+    if (!updated) return null;
+    const items = await this.repo.findItemsByIntakeId(id);
+
+    const diff = buildPoIntakeUpdateDiff(row, beforeItems, updated, items);
+    if (diff.fieldChanges.length > 0 && changedBy?.trim()) {
+      await this.updateLogRepo.create({
+        intakeId: id,
+        changedBy: changedBy.trim(),
+        fieldsChanged: diff.fieldsChanged,
+        fieldChanges: diff.fieldChanges,
+      });
+    }
+
+    const linkedAfter = this.mappingRepo ? await this.mappingRepo.findActiveShipmentsByIntakeId(id) : [];
+    const takenByName =
+      updated.taken_by_user_id && this.userRepo
+        ? (await this.userRepo.findById(updated.taken_by_user_id))?.name ?? null
+        : null;
+    return buildDetail(this.lineReceivedRepo, updated, items, linkedAfter, takenByName, overshipped);
+  }
+
   getImportTemplateCsv(): string {
     return `${MONITORING_CSV_HEADERS.join(",")}
 PO-0001,PT Supplier A,1,Caustic Soda Flakes,100,MT,1250.5,Plant A,PT EOS,Warehouse Merak,FOB Shanghai,Yes,USD
@@ -252,7 +356,12 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
 `;
   }
 
-  async importFromCsv(csvText: string, actorName: string, fileName: string | null): Promise<PoCsvImportResult> {
+  async importFromCsv(
+    csvText: string,
+    actorName: string,
+    fileName: string | null,
+    createdByUserId?: string | null
+  ): Promise<PoCsvImportResult> {
     const lines = csvText
       .split(/\r?\n/)
       .map((l) => l.trim())
@@ -406,24 +515,27 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
 
       try {
         const externalId = await generateExternalId(this.repo, sample.po_number);
-        await this.create({
-          external_id: externalId,
-          po_number: sample.po_number,
-          supplier_name: sample.supplier_name,
-          plant: sample.plant,
-          pt: sample.pt,
-          delivery_location: sample.delivery_location,
-          incoterm_location: sample.incoterm_location,
-          kawasan_berikat: sample.kawasan_berikat,
-          currency: sample.currency,
-          items: poRows.map((r) => ({
-            line_number: r.line_number,
-            item_description: r.item_description,
-            qty: r.qty,
-            unit: r.unit,
-            value: r.unit_price,
-          })),
-        });
+        await this.create(
+          {
+            external_id: externalId,
+            po_number: sample.po_number,
+            supplier_name: sample.supplier_name,
+            plant: sample.plant,
+            pt: sample.pt,
+            delivery_location: sample.delivery_location,
+            incoterm_location: sample.incoterm_location,
+            kawasan_berikat: sample.kawasan_berikat,
+            currency: sample.currency,
+            items: poRows.map((r) => ({
+              line_number: r.line_number,
+              item_description: r.item_description,
+              qty: r.qty,
+              unit: r.unit,
+              value: r.unit_price,
+            })),
+          },
+          { createdByUserId }
+        );
         importedPos += 1;
         importedRows += poRows.length;
       } catch (e) {

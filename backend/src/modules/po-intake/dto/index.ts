@@ -21,6 +21,29 @@ export interface PoIntakeItemDto {
   value?: number;
 }
 
+/** PATCH /po/:id — same shape as create except no external_id; items may include `id` for existing lines. */
+export interface UpdatePoIntakeItemDto {
+  /** Existing line id; omit to insert a new line. */
+  id?: string;
+  line_number?: number;
+  item_description: string;
+  qty: number;
+  unit: string;
+  value: number;
+}
+
+export interface UpdatePoIntakeDto {
+  po_number: string;
+  plant?: string;
+  pt?: string;
+  supplier_name: string;
+  delivery_location?: string;
+  incoterm_location?: string;
+  kawasan_berikat?: string;
+  currency?: string;
+  items: UpdatePoIntakeItemDto[];
+}
+
 /** Create intake (ingestion or test-create). Matches SaaS payload. Rule: 1 PO = multiple items, 1 incoterm. */
 export interface CreatePoIntakeDto {
   external_id: string;
@@ -58,6 +81,8 @@ export interface PoIntakeRow {
   kawasan_berikat: string | null;
   currency: string | null;
   intake_status: string;
+  /** Set when a logged-in user created the PO (test-create, CSV). Null for automated ingestion. */
+  created_by_user_id: string | null;
   taken_by_user_id: string | null;
   taken_at: Date | null;
   created_at: Date;
@@ -184,4 +209,25 @@ export interface PoImportHistoryRow {
   status: string;
   created_at: Date;
   finished_at: Date | null;
+}
+
+/** GET /po/:id/activity-log — merged audit trail (aligned with shipment activity shape). */
+export interface PoIntakeActivityItem {
+  id: string;
+  type:
+    | "po_created"
+    | "po_claimed"
+    | "couple_shipment"
+    | "decouple_shipment"
+    | "po_updated";
+  title: string;
+  detail: string | null;
+  field_changes?: Array<{
+    field: string;
+    label: string;
+    before: string | null;
+    after: string | null;
+  }>;
+  actor: string;
+  occurred_at: string;
 }

@@ -10,6 +10,7 @@ import type {
   PoImportHistoryRow,
   PoIntakeRow,
   PoIntakeItemRow,
+  UpdatePoIntakeDto,
 } from "../dto/index.js";
 
 export class PoIntakeRepository {
@@ -36,6 +37,15 @@ export class PoIntakeRepository {
     return result.rows.length > 0;
   }
 
+  async existsByPoNumberTrimmedExcludingId(poNumber: string, excludeIntakeId: string): Promise<boolean> {
+    const result = await this.pool.query<{ n: number }>(
+      `SELECT 1 AS n FROM Import_purchase_order
+       WHERE LOWER(TRIM(po_number)) = LOWER(TRIM($1)) AND id <> $2::uuid LIMIT 1`,
+      [poNumber, excludeIntakeId]
+    );
+    return result.rows.length > 0;
+  }
+
   /** Resolve intake id by PO number (trimmed, case-insensitive). */
   async findIdByPoNumberTrimmed(poNumber: string): Promise<string | null> {
     const result = await this.pool.query<{ id: string }>(
@@ -46,13 +56,13 @@ export class PoIntakeRepository {
     return result.rows[0]?.id ?? null;
   }
 
-  async create(dto: CreatePoIntakeDto, intakeStatus: string): Promise<PoIntakeRow> {
+  async create(dto: CreatePoIntakeDto, intakeStatus: string, createdByUserId?: string | null): Promise<PoIntakeRow> {
     const result = await this.pool.query<PoIntakeRow>(
       `INSERT INTO Import_purchase_order
-       (external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency, intake_status, total_amount_po, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NOW(), NOW())
+       (external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency, intake_status, total_amount_po, created_by_user_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, NOW(), NOW())
        RETURNING id, external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
-         intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
+         intake_status, created_by_user_id, taken_by_user_id, taken_at, created_at, updated_at`,
       [
         dto.external_id,
         dto.po_number,
@@ -64,6 +74,7 @@ export class PoIntakeRepository {
         dto.kawasan_berikat ?? null,
         dto.currency ?? null,
         intakeStatus,
+        createdByUserId ?? null,
       ]
     );
     if (!result.rows[0]) throw new Error("PoIntakeRepository.create: no row returned");
@@ -94,10 +105,94 @@ export class PoIntakeRepository {
     await this.recomputeTotalAmountPo(intakeId);
   }
 
+  async listItemIdsForIntake(intakeId: string): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT id FROM Import_purchase_order_items WHERE intake_id = $1`,
+      [intakeId]
+    );
+    return result.rows.map((r) => r.id);
+  }
+
+  /**
+   * Delete a PO line only when no shipment has recorded received qty for it.
+   * @returns `blocked` if deliveries reference this line; `deleted` if a row was removed.
+   */
+  async tryDeleteItemIfNoLineReceived(intakeId: string, itemId: string): Promise<{ deleted: boolean; blocked: boolean }> {
+    const block = await this.pool.query(`SELECT 1 FROM shipment_po_line_received WHERE item_id = $1 LIMIT 1`, [itemId]);
+    if (block.rows.length > 0) return { deleted: false, blocked: true };
+    const r = await this.pool.query(
+      `DELETE FROM Import_purchase_order_items WHERE id = $1::uuid AND intake_id = $2::uuid`,
+      [itemId, intakeId]
+    );
+    return { deleted: (r.rowCount ?? 0) > 0, blocked: false };
+  }
+
+  async updateItemRow(
+    intakeId: string,
+    itemId: string,
+    lineNumber: number,
+    itemDescription: string,
+    qty: number,
+    unit: string,
+    unitPrice: number
+  ): Promise<boolean> {
+    const totalAmountItem = qty * unitPrice;
+    const r = await this.pool.query(
+      `UPDATE Import_purchase_order_items
+       SET line_number = $3, item_description = $4, qty = $5, unit = $6, unit_price = $7, total_amount_item = $8
+       WHERE id = $2::uuid AND intake_id = $1::uuid`,
+      [intakeId, itemId, lineNumber, itemDescription, qty, unit, unitPrice, totalAmountItem]
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async insertSingleItem(
+    intakeId: string,
+    lineNumber: number,
+    itemDescription: string,
+    qty: number,
+    unit: string,
+    unitPrice: number
+  ): Promise<void> {
+    const totalAmountItem = qty * unitPrice;
+    await this.pool.query(
+      `INSERT INTO Import_purchase_order_items (intake_id, line_number, item_description, qty, unit, unit_price, total_amount_item)
+       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)`,
+      [intakeId, lineNumber, itemDescription, qty, unit, unitPrice, totalAmountItem]
+    );
+  }
+
+  async updateIntakeHeader(intakeId: string, dto: UpdatePoIntakeDto): Promise<void> {
+    await this.pool.query(
+      `UPDATE Import_purchase_order SET
+         po_number = $2,
+         plant = $3,
+         pt = $4,
+         supplier_name = $5,
+         delivery_location = $6,
+         incoterm_location = $7,
+         kawasan_berikat = $8,
+         currency = $9,
+         updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [
+        intakeId,
+        dto.po_number,
+        dto.plant ?? null,
+        dto.pt ?? null,
+        dto.supplier_name,
+        dto.delivery_location ?? null,
+        dto.incoterm_location ?? null,
+        dto.kawasan_berikat ?? null,
+        dto.currency ?? null,
+      ]
+    );
+  }
+
   async findById(id: string): Promise<PoIntakeRow | null> {
     const result = await this.pool.query<PoIntakeRow>(
       `SELECT id, external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
-        intake_status, taken_by_user_id, taken_at, created_at, updated_at
+        intake_status, created_by_user_id, taken_by_user_id, taken_at, created_at, updated_at
        FROM Import_purchase_order WHERE id = $1`,
       [id]
     );
@@ -188,7 +283,7 @@ export class PoIntakeRepository {
     params.push(limit, offset);
     const result = await this.pool.query<PoIntakeRow & { taken_by_name: string | null }>(
       `SELECT i.id, i.external_id, i.po_number, i.plant, i.pt, i.supplier_name, i.delivery_location, i.incoterm_location, i.kawasan_berikat, i.currency,
-        i.intake_status, i.taken_by_user_id, i.taken_at, i.created_at, i.updated_at,
+        i.intake_status, i.created_by_user_id, i.taken_by_user_id, i.taken_at, i.created_at, i.updated_at,
         u.name AS taken_by_name
        FROM Import_purchase_order i
        LEFT JOIN users u ON u.id::text = i.taken_by_user_id
@@ -205,7 +300,7 @@ export class PoIntakeRepository {
       `UPDATE Import_purchase_order SET intake_status = $2, updated_at = NOW()
        WHERE id = $1
        RETURNING id, external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
-         intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
+         intake_status, created_by_user_id, taken_by_user_id, taken_at, created_at, updated_at`,
       [id, intakeStatus]
     );
     return result.rows[0] ?? null;
@@ -216,7 +311,7 @@ export class PoIntakeRepository {
       `UPDATE Import_purchase_order SET intake_status = 'CLAIMED', taken_by_user_id = $1, taken_at = NOW(), updated_at = NOW()
        WHERE id = $2
        RETURNING id, external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
-         intake_status, taken_by_user_id, taken_at, created_at, updated_at`,
+         intake_status, created_by_user_id, taken_by_user_id, taken_at, created_at, updated_at`,
       [userId, id]
     );
     return result.rows[0] ?? null;

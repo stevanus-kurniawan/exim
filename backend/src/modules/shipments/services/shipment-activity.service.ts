@@ -20,7 +20,7 @@ const SHIPMENT_UPDATE_FIELD_LABELS: Record<string, string> = {
   remarks: "Remarks",
   pib_type: "PIB type",
   no_request_pib: "PIB doc no.",
-  ppjk_mkl: "PPJK/MKL",
+  ppjk_mkl: "PPJK/EMKL",
   product_classification: "Product classification",
   nopen: "NOPEN",
   nopen_date: "NOPEN date",

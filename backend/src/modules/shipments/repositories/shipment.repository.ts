@@ -4,10 +4,12 @@
 
 import type { Pool } from "pg";
 import { getPool } from "../../../db/index.js";
+import { classificationFilterSqlVariants } from "../../../shared/product-classification.js";
 import type {
   CreateShipmentDto,
   UpdateShipmentDto,
   ListShipmentsQuery,
+  ShipmentListFilterOptions,
   ShipmentRow,
 } from "../dto/index.js";
 
@@ -115,9 +117,17 @@ export class ShipmentRepository {
     const params: unknown[] = [];
     let idx = 1;
 
-    if (query.status) {
+    const statusList = [
+      ...new Set(
+        [...(query.statuses ?? []), ...(query.status?.trim() ? [query.status.trim()] : [])].filter(Boolean)
+      ),
+    ];
+    if (statusList.length === 1) {
       conditions.push(`s.current_status = $${idx++}`);
-      params.push(query.status);
+      params.push(statusList[0]);
+    } else if (statusList.length > 1) {
+      conditions.push(`s.current_status = ANY($${idx++}::text[])`);
+      params.push(statusList);
     }
     if (query.supplier_name) {
       conditions.push(`s.vendor_name ILIKE $${idx++}`);
@@ -130,6 +140,14 @@ export class ShipmentRepository {
     if (query.to_date) {
       conditions.push(`s.created_at <= $${idx++}`);
       params.push(query.to_date);
+    }
+    if (query.created_from) {
+      conditions.push(`(s.created_at AT TIME ZONE 'UTC')::date >= $${idx++}::date`);
+      params.push(query.created_from);
+    }
+    if (query.created_to) {
+      conditions.push(`(s.created_at AT TIME ZONE 'UTC')::date <= $${idx++}::date`);
+      params.push(query.created_to);
     }
     if (query.search) {
       conditions.push(
@@ -175,6 +193,207 @@ export class ShipmentRepository {
       poDateParts.push(`)`);
       conditions.push(poDateParts.join(" "));
     }
+    const ptList = [
+      ...new Set(
+        [...(query.pts ?? []), ...(query.pt?.trim() ? [query.pt.trim()] : [])].filter(Boolean)
+      ),
+    ];
+    if (ptList.length === 1) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM shipment_po_mapping m
+        JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+        WHERE m.shipment_id = s.id AND TRIM(COALESCE(i.pt, '')) = $${idx++}
+      )`);
+      params.push(ptList[0]);
+    } else if (ptList.length > 1) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM shipment_po_mapping m
+        JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+        WHERE m.shipment_id = s.id AND TRIM(COALESCE(i.pt, '')) = ANY($${idx++}::text[])
+      )`);
+      params.push(ptList);
+    }
+
+    const plantList = [
+      ...new Set(
+        [...(query.plants ?? []), ...(query.plant?.trim() ? [query.plant.trim()] : [])].filter(Boolean)
+      ),
+    ];
+    if (plantList.length === 1) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM shipment_po_mapping m
+        JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+        WHERE m.shipment_id = s.id AND TRIM(COALESCE(i.plant, '')) = $${idx++}
+      )`);
+      params.push(plantList[0]);
+    } else if (plantList.length > 1) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM shipment_po_mapping m
+        JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+        WHERE m.shipment_id = s.id AND TRIM(COALESCE(i.plant, '')) = ANY($${idx++}::text[])
+      )`);
+      params.push(plantList);
+    }
+
+    const classCanon = [
+      ...new Set(
+        [
+          ...(query.product_classifications ?? []),
+          ...(query.product_classification?.trim() ? [query.product_classification.trim()] : []),
+        ].filter(Boolean)
+      ),
+    ];
+    if (classCanon.length > 0) {
+      const variantSet = new Set<string>();
+      for (const c of classCanon) {
+        for (const v of classificationFilterSqlVariants(c)) {
+          variantSet.add(v);
+        }
+      }
+      const variants = [...variantSet];
+      if (variants.length === 1) {
+        conditions.push(`TRIM(COALESCE(s.product_classification, '')) = $${idx++}`);
+        params.push(variants[0]);
+      } else {
+        conditions.push(`TRIM(COALESCE(s.product_classification, '')) = ANY($${idx++}::text[])`);
+        params.push(variants);
+      }
+    }
+
+    const vendorList = [
+      ...new Set(
+        [
+          ...(query.vendor_names_exact ?? []),
+          ...(query.vendor_name_exact?.trim() ? [query.vendor_name_exact.trim()] : []),
+        ].filter(Boolean)
+      ),
+    ];
+    if (vendorList.length === 1) {
+      conditions.push(`LOWER(TRIM(COALESCE(s.vendor_name, ''))) = LOWER($${idx++})`);
+      params.push(vendorList[0]);
+    } else if (vendorList.length > 1) {
+      conditions.push(`LOWER(TRIM(COALESCE(s.vendor_name, ''))) = ANY($${idx++}::text[])`);
+      params.push(vendorList.map((v) => v.toLowerCase()));
+    }
+
+    const shipmentNoList = [...new Set([...(query.shipment_nos ?? [])].filter(Boolean))];
+    if (shipmentNoList.length === 1) {
+      conditions.push(`s.shipment_no = $${idx++}`);
+      params.push(shipmentNoList[0]);
+    } else if (shipmentNoList.length > 1) {
+      conditions.push(`s.shipment_no = ANY($${idx++}::text[])`);
+      params.push(shipmentNoList);
+    }
+
+    const poNumList = [...new Set([...(query.po_numbers ?? [])].filter(Boolean))];
+    if (poNumList.length > 0) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM shipment_po_mapping m
+        JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+        WHERE m.shipment_id = s.id AND i.po_number = ANY($${idx++}::text[])
+      )`);
+      params.push(poNumList);
+    }
+
+    const incotermList = [...new Set([...(query.incoterms ?? [])].filter(Boolean))];
+    if (incotermList.length === 1) {
+      conditions.push(`TRIM(COALESCE(s.incoterm, '')) = $${idx++}`);
+      params.push(incotermList[0]);
+    } else if (incotermList.length > 1) {
+      conditions.push(`TRIM(COALESCE(s.incoterm, '')) = ANY($${idx++}::text[])`);
+      params.push(incotermList);
+    }
+
+    const pibList = [...new Set([...(query.pib_types ?? [])].filter(Boolean))];
+    if (pibList.length === 1) {
+      conditions.push(`TRIM(COALESCE(s.pib_type, '')) = $${idx++}`);
+      params.push(pibList[0]);
+    } else if (pibList.length > 1) {
+      conditions.push(`TRIM(COALESCE(s.pib_type, '')) = ANY($${idx++}::text[])`);
+      params.push(pibList);
+    }
+
+    const methodList = [
+      ...new Set(
+        [...(query.shipment_methods ?? []), ...(query.shipment_method?.trim() ? [query.shipment_method.trim()] : [])].filter(
+          Boolean
+        )
+      ),
+    ];
+    if (methodList.length === 1) {
+      conditions.push(`UPPER(TRIM(COALESCE(s.shipment_method, ''))) = UPPER($${idx++})`);
+      params.push(methodList[0]);
+    } else if (methodList.length > 1) {
+      conditions.push(
+        `UPPER(TRIM(COALESCE(s.shipment_method, ''))) = ANY(SELECT UPPER(unnest($${idx++}::text[])))`
+      );
+      params.push(methodList);
+    }
+
+    const shipByList = [...new Set([...(query.ship_bys ?? [])].filter(Boolean))];
+    if (shipByList.length === 1) {
+      conditions.push(`TRIM(COALESCE(s.ship_by, '')) = $${idx++}`);
+      params.push(shipByList[0]);
+    } else if (shipByList.length > 1) {
+      conditions.push(`TRIM(COALESCE(s.ship_by, '')) = ANY($${idx++}::text[])`);
+      params.push(shipByList);
+    }
+
+    const fwdList = [...new Set([...(query.forwarder_names ?? [])].filter(Boolean))];
+    if (fwdList.length === 1) {
+      conditions.push(`LOWER(TRIM(COALESCE(s.forwarder_name, ''))) = LOWER($${idx++})`);
+      params.push(fwdList[0]);
+    } else if (fwdList.length > 1) {
+      conditions.push(`LOWER(TRIM(COALESCE(s.forwarder_name, ''))) = ANY($${idx++}::text[])`);
+      params.push(fwdList.map((v) => v.toLowerCase()));
+    }
+
+    const picList = [...new Set([...(query.pic_names ?? [])].filter(Boolean))];
+    if (picList.length > 0) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM shipment_po_mapping m
+        JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+        LEFT JOIN users u ON u.id::text = i.taken_by_user_id
+        WHERE m.shipment_id = s.id AND TRIM(COALESCE(u.name, '')) = ANY($${idx++}::text[])
+      )`);
+      params.push(picList);
+    }
+
+    const etdList = [...new Set([...(query.etd_dates ?? [])].filter(Boolean))];
+    if (etdList.length === 1) {
+      conditions.push(`(s.etd AT TIME ZONE 'UTC')::date = $${idx++}::date`);
+      params.push(etdList[0]);
+    } else if (etdList.length > 1) {
+      conditions.push(`(s.etd AT TIME ZONE 'UTC')::date = ANY($${idx++}::date[])`);
+      params.push(etdList);
+    }
+
+    const etaList = [...new Set([...(query.eta_dates ?? [])].filter(Boolean))];
+    if (etaList.length === 1) {
+      conditions.push(`(s.eta AT TIME ZONE 'UTC')::date = $${idx++}::date`);
+      params.push(etaList[0]);
+    } else if (etaList.length > 1) {
+      conditions.push(`(s.eta AT TIME ZONE 'UTC')::date = ANY($${idx++}::date[])`);
+      params.push(etaList);
+    }
+
+    const originList = [...new Set([...(query.origin_port_names ?? [])].filter(Boolean))];
+    if (originList.length === 1) {
+      conditions.push(`TRIM(COALESCE(s.origin_port_name, '')) = $${idx++}`);
+      params.push(originList[0]);
+    } else if (originList.length > 1) {
+      conditions.push(`TRIM(COALESCE(s.origin_port_name, '')) = ANY($${idx++}::text[])`);
+      params.push(originList);
+    }
+
+    const destList = [...new Set([...(query.destination_port_names ?? [])].filter(Boolean))];
+    if (destList.length === 1) {
+      conditions.push(`TRIM(COALESCE(s.destination_port_name, '')) = $${idx++}`);
+      params.push(destList[0]);
+    } else if (destList.length > 1) {
+      conditions.push(`TRIM(COALESCE(s.destination_port_name, '')) = ANY($${idx++}::text[])`);
+      params.push(destList);
+    }
 
     const where = conditions.join(" AND ");
     const countResult = await this.pool.query<{ count: string }>(
@@ -199,6 +418,131 @@ export class ShipmentRepository {
     );
 
     return { rows: result.rows, total };
+  }
+
+  /**
+   * Distinct values per column for shipment list filters (full database).
+   */
+  async listDistinctFilterOptions(): Promise<ShipmentListFilterOptions> {
+    const [
+      statusResult,
+      shipmentNoResult,
+      ptResult,
+      plantResult,
+      vendorResult,
+      poNumResult,
+      incotermResult,
+      pibResult,
+      methodResult,
+      classResult,
+      shipByResult,
+      fwdResult,
+      picResult,
+      etdResult,
+      etaResult,
+      originResult,
+      destResult,
+    ] = await Promise.all([
+      this.pool.query<{ s: string }>(
+        `SELECT DISTINCT s.current_status AS s FROM shipments s ORDER BY s`
+      ),
+      this.pool.query<{ n: string }>(
+        `SELECT DISTINCT s.shipment_no AS n FROM shipments s ORDER BY n`
+      ),
+      this.pool.query<{ pt: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.pt, '')) AS pt
+         FROM Import_purchase_order i
+         INNER JOIN shipment_po_mapping m ON m.intake_id = i.id AND m.decoupled_at IS NULL
+         WHERE TRIM(COALESCE(i.pt, '')) <> ''
+         ORDER BY pt`
+      ),
+      this.pool.query<{ plant: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.plant, '')) AS plant
+         FROM Import_purchase_order i
+         INNER JOIN shipment_po_mapping m ON m.intake_id = i.id AND m.decoupled_at IS NULL
+         WHERE TRIM(COALESCE(i.plant, '')) <> ''
+         ORDER BY plant`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.vendor_name, '')) AS v
+         FROM shipments s
+         WHERE TRIM(COALESCE(s.vendor_name, '')) <> ''
+         ORDER BY v`
+      ),
+      this.pool.query<{ po: string }>(
+        `SELECT DISTINCT i.po_number AS po
+         FROM Import_purchase_order i
+         INNER JOIN shipment_po_mapping m ON m.intake_id = i.id AND m.decoupled_at IS NULL
+         ORDER BY po`
+      ),
+      this.pool.query<{ inc: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.incoterm, '')) AS inc FROM shipments s
+         WHERE TRIM(COALESCE(s.incoterm, '')) <> '' ORDER BY inc`
+      ),
+      this.pool.query<{ pib: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.pib_type, '')) AS pib FROM shipments s
+         WHERE TRIM(COALESCE(s.pib_type, '')) <> '' ORDER BY pib`
+      ),
+      this.pool.query<{ sm: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.shipment_method, '')) AS sm FROM shipments s
+         WHERE TRIM(COALESCE(s.shipment_method, '')) <> '' ORDER BY sm`
+      ),
+      this.pool.query<{ pc: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.product_classification, '')) AS pc FROM shipments s
+         WHERE TRIM(COALESCE(s.product_classification, '')) <> '' ORDER BY pc`
+      ),
+      this.pool.query<{ sb: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.ship_by, '')) AS sb FROM shipments s
+         WHERE TRIM(COALESCE(s.ship_by, '')) <> '' ORDER BY sb`
+      ),
+      this.pool.query<{ fn: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.forwarder_name, '')) AS fn FROM shipments s
+         WHERE TRIM(COALESCE(s.forwarder_name, '')) <> '' ORDER BY fn`
+      ),
+      this.pool.query<{ pic: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(u.name, '')) AS pic
+         FROM shipment_po_mapping m
+         JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+         LEFT JOIN users u ON u.id::text = i.taken_by_user_id
+         WHERE TRIM(COALESCE(u.name, '')) <> ''
+         ORDER BY pic`
+      ),
+      this.pool.query<{ d: string }>(
+        `SELECT DISTINCT to_char((s.etd AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d
+         FROM shipments s WHERE s.etd IS NOT NULL ORDER BY d`
+      ),
+      this.pool.query<{ d: string }>(
+        `SELECT DISTINCT to_char((s.eta AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d
+         FROM shipments s WHERE s.eta IS NOT NULL ORDER BY d`
+      ),
+      this.pool.query<{ o: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.origin_port_name, '')) AS o FROM shipments s
+         WHERE TRIM(COALESCE(s.origin_port_name, '')) <> '' ORDER BY o`
+      ),
+      this.pool.query<{ d: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(s.destination_port_name, '')) AS d FROM shipments s
+         WHERE TRIM(COALESCE(s.destination_port_name, '')) <> '' ORDER BY d`
+      ),
+    ]);
+    return {
+      statuses: statusResult.rows.map((r) => r.s),
+      shipment_numbers: shipmentNoResult.rows.map((r) => r.n),
+      pts: ptResult.rows.map((r) => r.pt),
+      plants: plantResult.rows.map((r) => r.plant),
+      vendors: vendorResult.rows.map((r) => r.v),
+      po_numbers: poNumResult.rows.map((r) => r.po),
+      incoterms: incotermResult.rows.map((r) => r.inc),
+      pib_types: pibResult.rows.map((r) => r.pib),
+      shipment_methods: methodResult.rows.map((r) => r.sm),
+      product_classifications: classResult.rows.map((r) => r.pc),
+      ship_bys: shipByResult.rows.map((r) => r.sb),
+      forwarder_names: fwdResult.rows.map((r) => r.fn),
+      pic_names: picResult.rows.map((r) => r.pic),
+      etd_dates: etdResult.rows.map((r) => r.d),
+      eta_dates: etaResult.rows.map((r) => r.d),
+      origin_port_names: originResult.rows.map((r) => r.o),
+      destination_port_names: destResult.rows.map((r) => r.d),
+    };
   }
 
   async update(id: string, dto: UpdateShipmentDto): Promise<ShipmentRow | null> {

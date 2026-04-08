@@ -119,6 +119,28 @@ export interface CreateTestPoPayload {
   items?: CreateTestPoItem[];
 }
 
+/** PATCH /po/:id — matches backend UpdatePoIntakeDto. */
+export interface UpdatePoItemPayload {
+  id?: string;
+  line_number?: number;
+  item_description: string;
+  qty: number;
+  unit: string;
+  value: number;
+}
+
+export interface UpdatePoPayload {
+  po_number: string;
+  plant?: string;
+  pt?: string;
+  supplier_name: string;
+  delivery_location?: string;
+  incoterm_location?: string;
+  kawasan_berikat?: string;
+  currency?: string;
+  items: UpdatePoItemPayload[];
+}
+
 export interface PoImportCsvErrorRow {
   row: number;
   field: string;
@@ -145,4 +167,20 @@ export interface PoImportHistoryItem {
   status: string;
   created_at: string;
   finished_at: string | null;
+}
+
+/** GET /po/:id/activity-log — aligned with shipment activity log shape. */
+export interface PoIntakeActivityItem {
+  id: string;
+  type: "po_created" | "po_claimed" | "couple_shipment" | "decouple_shipment" | "po_updated";
+  title: string;
+  detail: string | null;
+  field_changes?: Array<{
+    field: string;
+    label: string;
+    before: string | null;
+    after: string | null;
+  }>;
+  actor: string;
+  occurred_at: string;
 }

@@ -115,6 +115,10 @@ export interface ListShipmentsQuery {
   po_number?: string;
   from_date?: string;
   to_date?: string;
+  /** Inclusive YYYY-MM-DD on `(created_at AT TIME ZONE 'UTC')::date` (analytics / drill-down). */
+  created_from?: string;
+  /** Inclusive YYYY-MM-DD on `(created_at AT TIME ZONE 'UTC')::date`. */
+  created_to?: string;
   /** Inclusive; filters shipments that have at least one active linked PO whose effective PO date is on or after this day (uses `Import_purchase_order.po_date`, else intake `created_at` UTC date). */
   po_from_date?: string;
   /** Inclusive; same semantics as `po_from_date` for upper bound. */
@@ -124,6 +128,71 @@ export interface ListShipmentsQuery {
    * `closed_at IS NULL` and `current_status <> 'DELIVERED'`.
    */
   active_pipeline?: boolean;
+  /** Any linked PO (active mapping) has this exact trimmed `pt`. */
+  pt?: string;
+  /** Any linked PO has this exact trimmed `plant`. */
+  plant?: string;
+  /** OR of `pt` (repeat query param `pt` or CSV `pts_in`); merged with `pt` when both sent. */
+  pts?: string[];
+  /** OR of `plant` (repeat `plant` or CSV `plants_in`). */
+  plants?: string[];
+  /** Shipment `product_classification` matches canonical filter (includes legacy spellings for Chemical/Package). */
+  product_classification?: string;
+  /** OR of classifications (repeat `product_classification` or CSV `product_classifications_in`). */
+  product_classifications?: string[];
+  /** `shipment_method` case-insensitive exact trim (e.g. AIR, SEA). */
+  shipment_method?: string;
+  /** Case-insensitive exact match on `vendor_name`. */
+  vendor_name_exact?: string;
+  /** OR of vendor exact matches (repeat `vendor_name_exact` or CSV `vendor_names_in`). */
+  vendor_names_exact?: string[];
+  /** OR of `current_status` (repeat `status` or CSV `statuses_in`); when set with multiple values, single `status` is merged. */
+  statuses?: string[];
+  /** OR of `shipment_no` exact matches. */
+  shipment_nos?: string[];
+  /** OR of linked PO `po_number` exact matches (any active mapping). */
+  po_numbers?: string[];
+  /** OR of trimmed `incoterm`. */
+  incoterms?: string[];
+  /** OR of trimmed `pib_type`. */
+  pib_types?: string[];
+  /** OR of `shipment_method` (case-insensitive trim). */
+  shipment_methods?: string[];
+  /** OR of trimmed `ship_by`. */
+  ship_bys?: string[];
+  /** OR of trimmed `forwarder_name` (case-insensitive). */
+  forwarder_names?: string[];
+  /** OR of linked PO owner `users.name` (PIC). */
+  pic_names?: string[];
+  /** OR of ETD dates (YYYY-MM-DD, UTC date). */
+  etd_dates?: string[];
+  /** OR of ETA dates (YYYY-MM-DD, UTC date). */
+  eta_dates?: string[];
+  /** OR of trimmed `origin_port_name`. */
+  origin_port_names?: string[];
+  /** OR of trimmed `destination_port_name`. */
+  destination_port_names?: string[];
+}
+
+/** Distinct values for shipment list column filters (full database). */
+export interface ShipmentListFilterOptions {
+  statuses: string[];
+  shipment_numbers: string[];
+  pts: string[];
+  plants: string[];
+  vendors: string[];
+  po_numbers: string[];
+  incoterms: string[];
+  pib_types: string[];
+  shipment_methods: string[];
+  product_classifications: string[];
+  ship_bys: string[];
+  forwarder_names: string[];
+  pic_names: string[];
+  etd_dates: string[];
+  eta_dates: string[];
+  origin_port_names: string[];
+  destination_port_names: string[];
 }
 
 /** Line summary for shipment list PO expansion. */
@@ -315,6 +384,8 @@ export interface ShipmentDetail {
 export interface LinkedPoLineReceived {
   item_id: string;
   received_qty: number;
+  /** Snapshot from PO line at last write to shipment_po_line_received. */
+  item_description: string | null;
 }
 
 export interface LinkedPoSummary {

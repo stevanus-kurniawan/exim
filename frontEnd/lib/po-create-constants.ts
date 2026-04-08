@@ -1,6 +1,8 @@
 /**
  * PT (company) and Plant options for Create Purchase Order.
  * Plant is either a single fixed value or a dropdown per PT.
+ *
+ * Keep in sync with `backend/src/shared/pt-plant-options.ts` (dashboard seed / server checks).
  */
 
 /** PO line unit codes: Excel export set + legacy UI-only units (L, M2, PAIR, DOZ, OTH). Sorted A–Z. */
@@ -73,7 +75,10 @@ export const PT_PLANT_MAP: Record<PtOptionLabel, PtPlantConfig> = {
     plants: ["BATAM", "BONTANG", "LUBUK GAUNG", "KIJING / TJ PURA"],
   },
   "ENERGI OLEO PERSADA": { mode: "fixed", plant: "MORAWA" },
-  "PRIMUS SANUS COOKING OIL INDUSTRIAL (PT. PRISCOLIN)": { mode: "fixed", plant: "KARAWANG" },
+  "PRIMUS SANUS COOKING OIL INDUSTRIAL (PT. PRISCOLIN)": {
+    mode: "select",
+    plants: ["KARAWANG", "BEKASI"],
+  },
   "JATI PERKASA NUSANTARA": { mode: "select", plants: ["SIDOARJO", "GRESIK"] },
   "ROYAL FOODS INDONESIA": { mode: "fixed", plant: "BEKASI" },
   "PRIMA MAKMUR CAKRAWALA": { mode: "fixed", plant: "LUBUK GAUNG" },
@@ -83,4 +88,14 @@ export const PT_PLANT_MAP: Record<PtOptionLabel, PtPlantConfig> = {
 export function getPlantConfigForPt(pt: string): PtPlantConfig | null {
   if (!pt || !(pt in PT_PLANT_MAP)) return null;
   return PT_PLANT_MAP[pt as PtOptionLabel];
+}
+
+/** Distinct plant codes across all PT options (for analytics filters). */
+export function getAllPlantsSorted(): string[] {
+  const set = new Set<string>();
+  for (const cfg of Object.values(PT_PLANT_MAP)) {
+    if (cfg.mode === "fixed") set.add(cfg.plant);
+    else cfg.plants.forEach((p) => set.add(p));
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }

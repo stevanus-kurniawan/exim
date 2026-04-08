@@ -2,14 +2,16 @@
  * PO API — services layer. All PO (imported PO intake) API calls go through here.
  */
 
-import { apiGet, apiPost, apiRequest } from "./api-client";
+import { apiGet, apiPost, apiPatch, apiRequest } from "./api-client";
 import type {
   PoListItem,
   PoDetail,
   ListPoQuery,
   CreateTestPoPayload,
+  UpdatePoPayload,
   PoImportCsvResult,
   PoImportHistoryItem,
+  PoIntakeActivityItem,
 } from "@/types/po";
 import type { ApiResponse } from "@/types/api";
 import { config } from "@/lib/config";
@@ -38,6 +40,21 @@ export async function getPoDetail(
   accessToken: string | null
 ): Promise<ApiResponse<PoDetail>> {
   return apiGet<PoDetail>(`po/${id}`, accessToken);
+}
+
+export async function getPoActivityLog(
+  id: string,
+  accessToken: string | null
+): Promise<ApiResponse<{ items: PoIntakeActivityItem[] }>> {
+  return apiGet<{ items: PoIntakeActivityItem[] }>(`po/${id}/activity-log`, accessToken);
+}
+
+export async function updatePo(
+  id: string,
+  body: UpdatePoPayload,
+  accessToken: string | null
+): Promise<ApiResponse<PoDetail>> {
+  return apiPatch<PoDetail>(`po/${id}`, body, accessToken);
 }
 
 export async function takeOwnership(
