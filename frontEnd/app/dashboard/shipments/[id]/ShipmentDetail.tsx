@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useId } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
@@ -461,6 +461,44 @@ function DutyFormulaHint({ text }: { text: string }) {
       <span className={styles.dutyFormulaTooltip} role="tooltip">
         {text}
       </span>
+    </span>
+  );
+}
+
+const SHIPMENT_DOC_FILE_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,image/*";
+
+/**
+ * Native label → file input (htmlFor). Avoids programmatic input.click(), which many browsers block
+ * in embedded / cloud contexts (iframe, strict CSP-adjacent policies) while local top-level dev still works.
+ */
+function ShipmentDocUploadControl({
+  disabled,
+  isUploading,
+  onFile,
+}: {
+  disabled: boolean;
+  isUploading: boolean;
+  onFile: (file: File) => void;
+}) {
+  const inputId = useId();
+  return (
+    <span className={styles.shipmentDocUploadWrap}>
+      <input
+        id={inputId}
+        type="file"
+        className={styles.shipmentDocFileInputHidden}
+        accept={SHIPMENT_DOC_FILE_ACCEPT}
+        disabled={disabled}
+        tabIndex={-1}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onFile(f);
+          e.target.value = "";
+        }}
+      />
+      <label htmlFor={inputId} className={styles.shipmentDocUploadBtn}>
+        {isUploading ? "Uploading…" : "Upload"}
+      </label>
     </span>
   );
 }
@@ -3938,22 +3976,11 @@ export function ShipmentDetail({ id }: { id: string }) {
                             <div className={styles.shipmentDocSubHeader}>
                               <span className={styles.shipmentDocStatusLabel}>PO {display(po.po_number)}</span>
                               {canUploadDocument && (
-                                <label className={styles.shipmentDocUploadLabel}>
-                                  <span className={styles.shipmentDocUploadBtn}>
-                                    {uploadingDocSlotKey === slotKey ? "Uploading…" : "Upload"}
-                                  </span>
-                                  <input
-                                    type="file"
-                                    className={styles.shipmentDocFileInput}
-                                    accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
-                                    disabled={uploadingDocSlotKey === slotKey || !!detail?.closed_at}
-                                    onChange={(e) => {
-                                      const f = e.target.files?.[0];
-                                      if (f) handleShipmentDocumentUpload(slot.document_type, null, f, po.intake_id);
-                                      e.target.value = "";
-                                    }}
-                                  />
-                                </label>
+                                <ShipmentDocUploadControl
+                                  disabled={uploadingDocSlotKey === slotKey || !!detail?.closed_at}
+                                  isUploading={uploadingDocSlotKey === slotKey}
+                                  onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f, po.intake_id)}
+                                />
                               )}
                             </div>
                             <ul className={styles.shipmentDocFileList}>{renderShipmentDocumentFileList(files)}</ul>
@@ -3987,22 +4014,11 @@ export function ShipmentDetail({ id }: { id: string }) {
                         <div className={styles.shipmentDocSubHeader}>
                           <span className={styles.shipmentDocStatusLabel}>{st === "DRAFT" ? "Draft" : "Final"}</span>
                           {canUploadDocument && (
-                            <label className={styles.shipmentDocUploadLabel}>
-                              <span className={styles.shipmentDocUploadBtn}>
-                                {uploadingDocSlotKey === slotKey ? "Uploading…" : "Upload"}
-                              </span>
-                              <input
-                                type="file"
-                                className={styles.shipmentDocFileInput}
-                                accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
-                                disabled={uploadingDocSlotKey === slotKey || !!detail?.closed_at}
-                                onChange={(e) => {
-                                  const f = e.target.files?.[0];
-                                  if (f) handleShipmentDocumentUpload(slot.document_type, st, f);
-                                  e.target.value = "";
-                                }}
-                              />
-                            </label>
+                            <ShipmentDocUploadControl
+                              disabled={uploadingDocSlotKey === slotKey || !!detail?.closed_at}
+                              isUploading={uploadingDocSlotKey === slotKey}
+                              onFile={(f) => handleShipmentDocumentUpload(slot.document_type, st, f)}
+                            />
                           )}
                         </div>
                         <ul className={styles.shipmentDocFileList}>{renderShipmentDocumentFileList(files)}</ul>
@@ -4015,24 +4031,13 @@ export function ShipmentDetail({ id }: { id: string }) {
                   <div className={styles.shipmentDocSubHeader}>
                     <span className={styles.shipmentDocStatusLabel}>Files</span>
                     {canUploadDocument && (
-                      <label className={styles.shipmentDocUploadLabel}>
-                        <span className={styles.shipmentDocUploadBtn}>
-                          {uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) ? "Uploading…" : "Upload"}
-                        </span>
-                        <input
-                          type="file"
-                          className={styles.shipmentDocFileInput}
-                          accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
-                          disabled={
-                            uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) || !!detail?.closed_at
-                          }
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) handleShipmentDocumentUpload(slot.document_type, null, f);
-                            e.target.value = "";
-                          }}
-                        />
-                      </label>
+                      <ShipmentDocUploadControl
+                        disabled={
+                          uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) || !!detail?.closed_at
+                        }
+                        isUploading={uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null)}
+                        onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f)}
+                      />
                     )}
                   </div>
                   <ul className={styles.shipmentDocFileList}>
