@@ -39,6 +39,7 @@ import type {
   ShipmentCsvImportResult,
   UpdateShipmentDto,
   ListShipmentsQuery,
+  ShipmentListFilterOptions,
   ShipmentRow,
   ShipmentListItem,
   ShipmentListLinkedPo,
@@ -303,7 +304,7 @@ function toLinkedSummary(
     coupled_at: Date;
     coupled_by: string;
   },
-  lineReceived: { item_id: string; received_qty: number }[] = []
+  lineReceived: { item_id: string; received_qty: number; item_description?: string | null }[] = []
 ): LinkedPoSummary {
   return {
     intake_id: row.intake_id,
@@ -318,7 +319,11 @@ function toLinkedSummary(
     coupled_at: row.coupled_at.toISOString(),
     coupled_by: row.coupled_by,
     taken_by_name: row.taken_by_name ?? null,
-    line_received: lineReceived,
+    line_received: lineReceived.map((l) => ({
+      item_id: l.item_id,
+      received_qty: l.received_qty,
+      item_description: l.item_description ?? null,
+    })),
   };
 }
 
@@ -884,6 +889,10 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
     return { items, total };
   }
 
+  async listFilterOptions(): Promise<ShipmentListFilterOptions> {
+    return this.repo.listDistinctFilterOptions();
+  }
+
   async getById(id: string): Promise<ShipmentDetail | null> {
     const row = await this.repo.findById(id);
     if (!row) return null;
@@ -1101,6 +1110,9 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
     if (!isCoupled) throw new AppError("PO is not coupled to this shipment", 404);
     const poItems = await poIntakeRepo.findItemsByIntakeId(intakeId);
     const poQtyByItem = new Map(poItems.map((i) => [i.id, i.qty ?? 0]));
+    const itemDescriptionById = new Map(
+      poItems.map((i) => [i.id, (i.item_description ?? "").trim() || null] as const)
+    );
     const shipBy = (shipment.ship_by ?? "").trim();
     if (shipBy === "Bulk") {
       const maxAllowed = 1.05; // 5% over PO qty
@@ -1123,7 +1135,11 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
     await this.lineReceivedRepo.setLines(
       shipmentId,
       intakeId,
-      lines.map(({ item_id, received_qty }) => ({ item_id, received_qty }))
+      lines.map(({ item_id, received_qty }) => ({
+        item_id,
+        received_qty,
+        item_description: itemDescriptionById.get(item_id) ?? null,
+      }))
     );
     for (const line of lines) {
       await poIntakeRepo.recomputeTotalAmountItemByLine(intakeId, line.item_id);

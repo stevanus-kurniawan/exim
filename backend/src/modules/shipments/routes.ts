@@ -19,6 +19,12 @@ export const shipmentRoutes = Router();
 shipmentRoutes.post("/", authMiddleware, requirePermission(PERMISSIONS.CREATE_SHIPMENT), shipmentController.create);
 shipmentRoutes.get("/", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), shipmentController.list);
 shipmentRoutes.get(
+  "/list-filter-options",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_SHIPMENTS),
+  shipmentController.listFilterOptions
+);
+shipmentRoutes.get(
   "/import/combined-template-csv",
   authMiddleware,
   requirePermission(PERMISSIONS.IMPORT_PO_CSV),

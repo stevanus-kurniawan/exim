@@ -2,9 +2,21 @@
  * Shipments API types — align with backend GET /shipments, GET /shipments/:id.
  */
 
+/** Operational timeline `current_status` values (backend `SHIPMENT_STATUSES`). */
+export type ShipmentStatus =
+  | "INITIATE_SHIPPING_DOCUMENT"
+  | "BIDDING_TRANSPORTER"
+  | "TRANSPORT_CONFIRMED"
+  | "READY_PICKUP"
+  | "PICKED_UP"
+  | "ON_SHIPMENT"
+  | "CUSTOMS_CLEARANCE"
+  | "DELIVERED";
+
 export interface LinkedPoLineReceived {
   item_id: string;
   received_qty: number;
+  item_description: string | null;
 }
 
 /** PO line row in shipment list expand panel. */
@@ -59,7 +71,7 @@ export interface ShipmentListItem {
   forwarder_name: string | null;
   origin_port_name: string | null;
   destination_port_name: string | null;
-  current_status: string;
+  current_status: ShipmentStatus;
   etd: string | null;
   eta: string | null;
   linked_po_count: number;
@@ -96,7 +108,7 @@ export interface ShipmentDetail {
   /** Depot drop: yes / no */
   depo: boolean | null;
   depo_location: string | null;
-  current_status: string;
+  current_status: ShipmentStatus;
   closed_at: string | null;
   close_reason: string | null;
   remarks: string | null;
@@ -184,6 +196,9 @@ export interface ListShipmentsQuery {
   po_number?: string;
   from_date?: string;
   to_date?: string;
+  /** Inclusive YYYY-MM-DD on shipment `created_at` (UTC date). */
+  created_from?: string;
+  created_to?: string;
   /** Effective PO date: `imported_po_intake.po_date`, else intake created date (UTC). */
   po_from_date?: string;
   po_to_date?: string;
@@ -192,6 +207,49 @@ export interface ListShipmentsQuery {
    * Use for KPIs such as dashboard “active” shipment count.
    */
   active_pipeline?: boolean;
+  pt?: string;
+  plant?: string;
+  pts?: string[];
+  plants?: string[];
+  product_classification?: string;
+  product_classifications?: string[];
+  shipment_method?: string;
+  vendor_name_exact?: string;
+  vendor_names_exact?: string[];
+  statuses?: string[];
+  shipment_nos?: string[];
+  po_numbers?: string[];
+  incoterms?: string[];
+  pib_types?: string[];
+  shipment_methods?: string[];
+  ship_bys?: string[];
+  forwarder_names?: string[];
+  pic_names?: string[];
+  etd_dates?: string[];
+  eta_dates?: string[];
+  origin_port_names?: string[];
+  destination_port_names?: string[];
+}
+
+/** Full-database distinct values for shipment list column filters. */
+export interface ShipmentListFilterOptions {
+  statuses: string[];
+  shipment_numbers: string[];
+  pts: string[];
+  plants: string[];
+  vendors: string[];
+  po_numbers: string[];
+  incoterms: string[];
+  pib_types: string[];
+  shipment_methods: string[];
+  product_classifications: string[];
+  ship_bys: string[];
+  forwarder_names: string[];
+  pic_names: string[];
+  etd_dates: string[];
+  eta_dates: string[];
+  origin_port_names: string[];
+  destination_port_names: string[];
 }
 
 export interface ShipmentTimelineEntry {
@@ -203,7 +261,7 @@ export interface ShipmentTimelineEntry {
 }
 
 export interface ShipmentStatusSummaryData {
-  current_status: string;
+  current_status: ShipmentStatus;
   previous_status: string | null;
   last_updated_at: string;
 }

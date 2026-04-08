@@ -23,6 +23,7 @@ import {
 import { intakeStatusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
 import { formatPoStatusLabel } from "@/lib/po-status-label";
 import { isApiError } from "@/types/api";
+import { can } from "@/lib/permissions";
 import type { PoListItem } from "@/types/po";
 import type { ApiSuccess } from "@/types/api";
 import { RefreshIcon } from "@/components/icons/RefreshIcon";
@@ -69,7 +70,7 @@ export function PoList() {
   const searchParams = useSearchParams();
   const statusFromUrl = searchParams.get("intake_status") ?? undefined;
   const searchFromUrl = searchParams.get("search") ?? "";
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const { visibleById, toggleColumn, resetColumns, columns: poColumnDefs } = useTableColumnVisibility(
     PO_LIST_TABLE_COLUMNS_KEY,
     PO_TABLE_COLUMNS
@@ -258,6 +259,11 @@ export function PoList() {
               <Link href={`/dashboard/po/${row.id}`} className={styles.actionBtn}>
                 View
               </Link>
+              {can(user, "UPDATE_PO_INTAKE") && (
+                <Link href={`/dashboard/po/${row.id}/edit`} className={styles.actionBtn}>
+                  Edit
+                </Link>
+              )}
             </div>
           </TableCell>
         );

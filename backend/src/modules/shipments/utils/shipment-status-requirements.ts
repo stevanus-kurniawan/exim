@@ -44,7 +44,7 @@ export const STATUS_FIELD_LABELS: Record<string, string> = {
   ship_by: "Ship by",
   pib_type: "PIB type",
   no_request_pib: "PIB Doc No",
-  ppjk_mkl: "PPJK/MKL",
+  ppjk_mkl: "PPJK/EMKL",
   nopen: "Nopen",
   nopen_date: "Nopen Date",
   coo: "COO (Certificate of Origin)",

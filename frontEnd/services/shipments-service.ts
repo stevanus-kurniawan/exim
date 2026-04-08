@@ -5,6 +5,7 @@
 import { apiGet, apiPost, apiPatch, apiPut, apiDelete, apiRequest } from "./api-client";
 import type {
   ShipmentListItem,
+  ShipmentListFilterOptions,
   ShipmentDetail,
   ListShipmentsQuery,
   ShipmentTimelineEntry,
@@ -19,19 +20,51 @@ import type {
 import type { ApiResponse } from "@/types/api";
 import { config } from "@/lib/config";
 
+function appendMulti(params: URLSearchParams, key: string, values: string[] | undefined) {
+  values?.forEach((v) => params.append(key, v));
+}
+
 function buildQueryString(query: ListShipmentsQuery): string {
   const params = new URLSearchParams();
   if (query.page != null) params.set("page", String(query.page));
   if (query.limit != null) params.set("limit", String(query.limit));
   if (query.search) params.set("search", query.search);
   if (query.status) params.set("status", query.status);
+  appendMulti(params, "statuses", query.statuses);
   if (query.supplier_name) params.set("supplier_name", query.supplier_name);
   if (query.po_number) params.set("po_number", query.po_number);
   if (query.from_date) params.set("from_date", query.from_date);
   if (query.to_date) params.set("to_date", query.to_date);
+  if (query.created_from) params.set("created_from", query.created_from);
+  if (query.created_to) params.set("created_to", query.created_to);
   if (query.po_from_date) params.set("po_from_date", query.po_from_date);
   if (query.po_to_date) params.set("po_to_date", query.po_to_date);
   if (query.active_pipeline) params.set("active_pipeline", "true");
+  query.pts?.forEach((p) => params.append("pt", p));
+  query.plants?.forEach((p) => params.append("plant", p));
+  if (!query.pts?.length && query.pt) params.set("pt", query.pt);
+  if (!query.plants?.length && query.plant) params.set("plant", query.plant);
+  query.product_classifications?.forEach((c) => params.append("product_classification", c));
+  if (!query.product_classifications?.length && query.product_classification) {
+    params.set("product_classification", query.product_classification);
+  }
+  if (query.shipment_method) params.set("shipment_method", query.shipment_method);
+  appendMulti(params, "shipment_method_multi", query.shipment_methods);
+  query.vendor_names_exact?.forEach((v) => params.append("vendor_name_exact", v));
+  if (!query.vendor_names_exact?.length && query.vendor_name_exact) {
+    params.set("vendor_name_exact", query.vendor_name_exact);
+  }
+  appendMulti(params, "shipment_no", query.shipment_nos);
+  appendMulti(params, "po_number_exact", query.po_numbers);
+  appendMulti(params, "incoterm", query.incoterms);
+  appendMulti(params, "pib_type", query.pib_types);
+  appendMulti(params, "ship_by", query.ship_bys);
+  appendMulti(params, "forwarder_name", query.forwarder_names);
+  appendMulti(params, "pic_name", query.pic_names);
+  appendMulti(params, "etd_date", query.etd_dates);
+  appendMulti(params, "eta_date", query.eta_dates);
+  appendMulti(params, "origin_port_name", query.origin_port_names);
+  appendMulti(params, "destination_port_name", query.destination_port_names);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
@@ -42,6 +75,12 @@ export async function listShipments(
 ): Promise<ApiResponse<ShipmentListItem[]>> {
   const path = `shipments${buildQueryString(query)}`;
   return apiGet<ShipmentListItem[]>(path, accessToken);
+}
+
+export async function getShipmentListFilterOptions(
+  accessToken: string | null
+): Promise<ApiResponse<ShipmentListFilterOptions>> {
+  return apiGet<ShipmentListFilterOptions>("shipments/list-filter-options", accessToken);
 }
 
 export async function getShipmentDetail(

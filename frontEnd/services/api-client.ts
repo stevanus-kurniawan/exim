@@ -127,6 +127,7 @@ export async function apiRequest<T>(
   async function doFetch(bearer: string | null): Promise<Response> {
     return fetch(url, {
       ...init,
+      cache: init.cache ?? "no-store",
       headers: getHeaders(bearer, customHeaders, body),
       body: payload as RequestInit["body"],
     });

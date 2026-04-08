@@ -236,4 +236,38 @@ export class ShipmentPoMappingRepository {
     );
     return (result.rowCount ?? 0) > 0;
   }
+
+  /** All shipment mappings for an intake (including decoupled), for PO activity log. */
+  async findAllMappingsWithShipmentByIntakeId(intakeId: string): Promise<
+    Array<{
+      mapping_id: string;
+      shipment_id: string;
+      shipment_no: string;
+      coupled_at: Date;
+      coupled_by: string;
+      decoupled_at: Date | null;
+      decoupled_by: string | null;
+      decouple_reason: string | null;
+    }>
+  > {
+    const result = await this.pool.query<{
+      mapping_id: string;
+      shipment_id: string;
+      shipment_no: string;
+      coupled_at: Date;
+      coupled_by: string;
+      decoupled_at: Date | null;
+      decoupled_by: string | null;
+      decouple_reason: string | null;
+    }>(
+      `SELECT m.id AS mapping_id, m.shipment_id, s.shipment_no, m.coupled_at, m.coupled_by,
+              m.decoupled_at, m.decoupled_by, m.decouple_reason
+       FROM shipment_po_mapping m
+       JOIN shipments s ON s.id = m.shipment_id
+       WHERE m.intake_id = $1
+       ORDER BY m.coupled_at ASC`,
+      [intakeId]
+    );
+    return result.rows;
+  }
 }

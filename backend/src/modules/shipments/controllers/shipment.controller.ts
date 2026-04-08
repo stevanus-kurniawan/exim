@@ -3,6 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
+import { mergeFilterTokens } from "../../../shared/http-query-multi.js";
 import { sendSuccess, sendError } from "../../../shared/response.js";
 import {
   validateCreateShipmentBody,
@@ -49,6 +50,26 @@ function parseListQuery(req: Request): ListShipmentsQuery {
     po_to_date: typeof q.po_to_date === "string" ? q.po_to_date : undefined,
     active_pipeline:
       q.active_pipeline === "true" || q.active_pipeline === "1" || q.active_pipeline === true ? true : undefined,
+    created_from: typeof q.created_from === "string" ? q.created_from : undefined,
+    created_to: typeof q.created_to === "string" ? q.created_to : undefined,
+    pts: mergeFilterTokens(q, "pt", "pts_in"),
+    plants: mergeFilterTokens(q, "plant", "plants_in"),
+    product_classifications: mergeFilterTokens(q, "product_classification", "product_classifications_in"),
+    shipment_method: typeof q.shipment_method === "string" ? q.shipment_method : undefined,
+    vendor_names_exact: mergeFilterTokens(q, "vendor_name_exact", "vendor_names_in"),
+    statuses: mergeFilterTokens(q, "statuses", "statuses_in"),
+    shipment_nos: mergeFilterTokens(q, "shipment_no", "shipment_nos_in"),
+    po_numbers: mergeFilterTokens(q, "po_number_exact", "po_numbers_in"),
+    incoterms: mergeFilterTokens(q, "incoterm", "incoterms_in"),
+    pib_types: mergeFilterTokens(q, "pib_type", "pib_types_in"),
+    shipment_methods: mergeFilterTokens(q, "shipment_method_multi", "shipment_methods_in"),
+    ship_bys: mergeFilterTokens(q, "ship_by", "ship_bys_in"),
+    forwarder_names: mergeFilterTokens(q, "forwarder_name", "forwarder_names_in"),
+    pic_names: mergeFilterTokens(q, "pic_name", "pic_names_in"),
+    etd_dates: mergeFilterTokens(q, "etd_date", "etd_dates_in"),
+    eta_dates: mergeFilterTokens(q, "eta_date", "eta_dates_in"),
+    origin_port_names: mergeFilterTokens(q, "origin_port_name", "origin_port_names_in"),
+    destination_port_names: mergeFilterTokens(q, "destination_port_name", "destination_port_names_in"),
   };
 }
 
@@ -73,6 +94,15 @@ export async function list(req: Request, res: Response, next: NextFunction): Pro
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     sendSuccess(res, items, { meta: { page, limit, total } });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listFilterOptions(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const data = await service.listFilterOptions();
+    sendSuccess(res, data);
   } catch (e) {
     next(e);
   }

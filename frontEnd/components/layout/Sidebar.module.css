@@ -35,8 +35,9 @@
   font-weight: var(--typography-fontWeight-medium, 500);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
   text-decoration: none;
-  border-radius: var(--borderRadius-md, 8px);
-  border-left: 3px solid transparent;
+  border-radius: 0 var(--borderRadius-md, 8px) var(--borderRadius-md, 8px) 0;
+  border-left: 4px solid transparent;
+  box-shadow: none;
   transition: background-color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out),
     color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out),
     border-color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out);
@@ -53,13 +54,15 @@
 }
 
 .navItem.active {
-  background-color: rgba(196, 58, 49, 0.08);
-  color: var(--color-semantic-primary-default, #c43a31);
+  background-color: rgba(196, 58, 49, 0.04);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
   border-left-color: var(--color-semantic-primary-default, #c43a31);
+  font-weight: var(--typography-fontWeight-semibold, 600);
 }
 
 .navItem.active:hover {
-  color: var(--color-semantic-primary-hover, #9e2c25);
+  background-color: rgba(196, 58, 49, 0.06);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
   border-left-color: var(--color-semantic-primary-hover, #9e2c25);
 }
 

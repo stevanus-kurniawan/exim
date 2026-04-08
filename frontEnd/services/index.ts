@@ -12,6 +12,10 @@ export {
   getPoDashboardCounts,
   getShipmentDashboardCounts,
   getDeliveredManagementSummary,
+  getDeliveredByPtPlantAgg,
+  getDeliveredByClassificationAgg,
+  getProcurementPlantReport,
+  getShipmentAnalytics,
 } from "./dashboard-service";
 export {
   listPo,

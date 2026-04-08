@@ -9,6 +9,7 @@ import { requirePermission } from "../auth/rbac.middleware.js";
 import { PERMISSIONS } from "../../shared/rbac.js";
 import { uploadSingle } from "../../middlewares/upload.middleware.js";
 import * as controller from "./controllers/po-intake.controller.js";
+import * as activityController from "./controllers/po-intake-activity.controller.js";
 
 export const poIntakeRoutes = Router();
 
@@ -43,6 +44,18 @@ poIntakeRoutes.post(
   requirePermission(PERMISSIONS.IMPORT_PO_CSV),
   uploadSingle,
   controller.importCsv
+);
+poIntakeRoutes.patch(
+  "/:id",
+  authMiddleware,
+  requirePermission(PERMISSIONS.UPDATE_PO_INTAKE),
+  controller.updateIntake
+);
+poIntakeRoutes.get(
+  "/:id/activity-log",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_PO_INTAKE),
+  activityController.getActivityLog
 );
 poIntakeRoutes.get("/:id", authMiddleware, requirePermission(PERMISSIONS.VIEW_PO_INTAKE), controller.getById);
 poIntakeRoutes.post("/:id/take", authMiddleware, requirePermission(PERMISSIONS.TAKE_OWNERSHIP), controller.takeOwnership);
