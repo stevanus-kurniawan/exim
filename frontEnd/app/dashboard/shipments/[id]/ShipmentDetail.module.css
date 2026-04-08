@@ -1868,24 +1868,24 @@
   overflow-wrap: anywhere;
 }
 
-/* Transparent file input covers the button so the real click target opens the OS picker reliably. */
-.shipmentDocUploadLabel {
+.shipmentDocUploadWrap {
   position: relative;
   display: inline-block;
-  cursor: pointer;
   margin: 0;
 }
 
-.shipmentDocFileInput {
+/* Off-screen: opened via button onClick -> input.click() (keeps user activation; works in incognito). */
+.shipmentDocFileInputHidden {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 1px;
+  height: 1px;
   margin: 0;
   padding: 0;
+  left: -9999px;
+  top: 0;
   opacity: 0;
-  cursor: pointer;
-  font-size: var(--typography-fontSize-base, 16px);
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .shipmentDocUploadBtn {
@@ -1897,9 +1897,17 @@
   border: 1px solid var(--color-semantic-primary-default, #c43a31);
   border-radius: var(--borderRadius-sm, 6px);
   background: var(--color-primitive-background-white, #ffffff);
+  cursor: pointer;
+  font-family: inherit;
+  margin: 0;
 }
 
-.shipmentDocUploadLabel:hover .shipmentDocUploadBtn {
+.shipmentDocUploadWrap input:disabled + .shipmentDocUploadBtn {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.shipmentDocUploadWrap input:not(:disabled) + .shipmentDocUploadBtn:hover {
   background: var(--color-primitive-background-light, #f4f4f4);
 }
 
