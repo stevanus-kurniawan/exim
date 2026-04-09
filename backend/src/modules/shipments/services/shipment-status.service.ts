@@ -88,7 +88,6 @@ export class ShipmentStatusService {
       atd: detail.atd,
       ata: detail.ata,
       depo: detail.depo,
-      bm_percentage: detail.bm_percentage,
       product_classification: detail.product_classification,
       closed_at: detail.closed_at,
       incoterm_amount: detail.incoterm_amount,
@@ -97,7 +96,12 @@ export class ShipmentStatusService {
         intake_id: po.intake_id,
         currency: po.currency,
         currency_rate: po.currency_rate,
-        line_received: po.line_received.map((l) => ({ received_qty: l.received_qty })),
+        line_received: po.line_received.map((l) => ({
+          received_qty: l.received_qty,
+          bm_percentage: l.bm_percentage,
+          ppn_percentage: l.ppn_percentage,
+          pph_percentage: l.pph_percentage,
+        })),
       })),
     };
 

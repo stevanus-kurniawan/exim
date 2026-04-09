@@ -109,26 +109,26 @@ export function validateUpdateShipmentBody(
     if (!Number.isFinite(n) || n < 0) errors.push({ field: "gross_weight_mt", message: "Must be a non-negative number" });
     else data.gross_weight_mt = n;
   }
-  if (body?.bm_percentage != null) {
-    const n = Number(body.bm_percentage);
-    if (!Number.isFinite(n) || n < 0 || n > 100) errors.push({ field: "bm_percentage", message: "BM percentage must be between 0 and 100" });
-    else data.bm_percentage = n;
+  if (body?.bm === null) {
+    data.bm = 0;
+  } else if (body?.bm !== undefined) {
+    const n = Number(body.bm);
+    if (!Number.isFinite(n) || n < 0) errors.push({ field: "bm", message: "Must be a non-negative number" });
+    else data.bm = n;
   }
-  if (body?.ppn_percentage === null) {
-    data.ppn_percentage = null;
-  } else if (body?.ppn_percentage !== undefined && body?.ppn_percentage !== null) {
-    const n = Number(body.ppn_percentage);
-    if (!Number.isFinite(n) || n < 0 || n > 100) {
-      errors.push({ field: "ppn_percentage", message: "PPN percentage must be between 0 and 100" });
-    } else data.ppn_percentage = n;
+  if (body?.ppn_amount === null) {
+    data.ppn_amount = 0;
+  } else if (body?.ppn_amount !== undefined) {
+    const n = Number(body.ppn_amount);
+    if (!Number.isFinite(n) || n < 0) errors.push({ field: "ppn_amount", message: "Must be a non-negative number" });
+    else data.ppn_amount = n;
   }
-  if (body?.pph_percentage === null) {
-    data.pph_percentage = null;
-  } else if (body?.pph_percentage !== undefined && body?.pph_percentage !== null) {
-    const n = Number(body.pph_percentage);
-    if (!Number.isFinite(n) || n < 0 || n > 100) {
-      errors.push({ field: "pph_percentage", message: "PPH percentage must be between 0 and 100" });
-    } else data.pph_percentage = n;
+  if (body?.pph_amount === null) {
+    data.pph_amount = 0;
+  } else if (body?.pph_amount !== undefined) {
+    const n = Number(body.pph_amount);
+    if (!Number.isFinite(n) || n < 0) errors.push({ field: "pph_amount", message: "Must be a non-negative number" });
+    else data.pph_amount = n;
   }
   if (typeof body?.origin_port_name === "string") data.origin_port_name = body.origin_port_name.trim() || undefined;
   if (typeof body?.origin_port_country === "string") data.origin_port_country = body.origin_port_country.trim() || undefined;

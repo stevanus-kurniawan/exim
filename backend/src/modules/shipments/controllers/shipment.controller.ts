@@ -70,6 +70,14 @@ function parseListQuery(req: Request): ListShipmentsQuery {
     eta_dates: mergeFilterTokens(q, "eta_date", "eta_dates_in"),
     origin_port_names: mergeFilterTokens(q, "origin_port_name", "origin_port_names_in"),
     destination_port_names: mergeFilterTokens(q, "destination_port_name", "destination_port_names_in"),
+    dormant_remaining_qty:
+      q.dormant_remaining_qty === "true" || q.dormant_remaining_qty === "1" ? true : undefined,
+    dormant_days: (() => {
+      const n = q.dormant_days != null ? parseInt(String(q.dormant_days), 10) : undefined;
+      return n != null && !Number.isNaN(n) && n > 0 ? n : undefined;
+    })(),
+    performance_eta_late:
+      q.performance_eta_late === "true" || q.performance_eta_late === "1" ? true : undefined,
   };
 }
 

@@ -85,8 +85,8 @@ export class ShipmentDocumentService {
   ): Promise<ShipmentDocumentListItem> {
     const shipment = await this.shipmentRepo.findById(shipmentId);
     if (!shipment) throw new AppError("Shipment not found", 404);
-    if (shipment.closed_at) {
-      throw new AppError("Cannot upload documents to a closed shipment", 409);
+    if (shipment.current_status === "DELIVERED") {
+      throw new AppError("Cannot upload documents when shipment status is DELIVERED", 409);
     }
 
     let resolvedIntakeId: string | null = intakeId;
@@ -144,8 +144,8 @@ export class ShipmentDocumentService {
   async remove(shipmentId: string, documentId: string): Promise<void> {
     const shipment = await this.shipmentRepo.findById(shipmentId);
     if (!shipment) throw new AppError("Shipment not found", 404);
-    if (shipment.closed_at) {
-      throw new AppError("Cannot delete documents from a closed shipment", 409);
+    if (shipment.current_status === "DELIVERED") {
+      throw new AppError("Cannot delete documents when shipment status is DELIVERED", 409);
     }
     const row = await this.docRepo.findByIdAndShipment(documentId, shipmentId);
     if (!row) throw new AppError("Document not found", 404);

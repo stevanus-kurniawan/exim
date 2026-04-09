@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { HelpCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { LOGIN_PATH } from "@/lib/constants";
 import { CommandPalette } from "@/components/navigation";
+import { useGuideTour } from "@/components/guide-tour";
 import styles from "./Header.module.css";
 
 export interface HeaderProps {
@@ -15,6 +17,7 @@ export interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const router = useRouter();
   const { user, logout } = useAuth();
+  const { startTour } = useGuideTour();
 
   async function handleLogout() {
     await logout();
@@ -44,6 +47,16 @@ export function Header({ onMenuClick }: HeaderProps) {
       </div>
       <nav className={styles.nav} aria-label="User menu">
         <CommandPalette />
+        <button
+          type="button"
+          className={styles.guideBtn}
+          onClick={() => startTour()}
+          aria-label="Open page guide"
+          title="Page guide"
+        >
+          <HelpCircle size={22} strokeWidth={2} aria-hidden />
+          <span className={styles.guideBtnLabel}>Guide</span>
+        </button>
         {user && (
           <span className={styles.user}>
             <span className={styles.userName}>{user.name}</span>

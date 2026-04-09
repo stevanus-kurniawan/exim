@@ -33,7 +33,7 @@ export class ShipmentRepository {
     incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
     destination_port_code, destination_port_name, destination_port_country, etd, eta, atd, ata, depo, depo_location, current_status,
     closed_at, close_reason, remarks, created_at, updated_at,
-    pib_type, no_request_pib, ppjk_mkl, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, net_weight_mt, gross_weight_mt, bm, bm_percentage, ppn_percentage, pph_percentage, kawasan_berikat, surveyor,
+    pib_type, no_request_pib, ppjk_mkl, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, net_weight_mt, gross_weight_mt, bm, ppn_amount, pph_amount, kawasan_berikat, surveyor,
     product_classification,
     unit_20ft, unit_40ft, unit_package, unit_20_iso_tank, container_count_20ft, container_count_40ft, package_count, container_count_20_iso_tank`;
 
@@ -46,10 +46,10 @@ export class ShipmentRepository {
         shipment_no, vendor_code, vendor_name, forwarder_code, forwarder_name, warehouse_code, warehouse_name,
         incoterm, shipment_method, origin_port_code, origin_port_name, origin_port_country,
         destination_port_code, destination_port_name, destination_port_country, etd, eta, remarks,
-        pib_type, no_request_pib, ppjk_mkl, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, bm, bm_percentage, ppn_percentage, pph_percentage, kawasan_berikat,
+        pib_type, no_request_pib, ppjk_mkl, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, bm, kawasan_berikat,
         product_classification,
         current_status, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, 'INITIATE_SHIPPING_DOCUMENT', NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, 'INITIATE_SHIPPING_DOCUMENT', NOW(), NOW())
       RETURNING ${this.selectColumns}`,
       [
         shipmentNo,
@@ -82,9 +82,6 @@ export class ShipmentRepository {
         dto.incoterm_amount ?? null,
         dto.cbm ?? null,
         null,
-        dto.bm_percentage ?? null,
-        dto.ppn_percentage ?? null,
-        dto.pph_percentage ?? null,
         dto.kawasan_berikat ?? null,
         dto.product_classification ?? null,
       ]
@@ -395,6 +392,27 @@ export class ShipmentRepository {
       params.push(destList);
     }
 
+    if (query.performance_eta_late) {
+      conditions.push(`s.current_status <> 'DELIVERED'`);
+      conditions.push(`s.eta IS NOT NULL`);
+      conditions.push(`(s.eta AT TIME ZONE 'UTC')::date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date`);
+    }
+
+    if (query.dormant_remaining_qty) {
+      const days = query.dormant_days ?? 30;
+      conditions.push(`s.updated_at < NOW() - ($${idx++}::int * INTERVAL '1 day')`);
+      params.push(Math.max(1, Math.floor(days)));
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM shipment_po_mapping m
+        JOIN Import_purchase_order_items it ON it.intake_id = m.intake_id
+        WHERE m.shipment_id = s.id AND m.decoupled_at IS NULL
+        AND COALESCE(it.qty, 0) > COALESCE((
+          SELECT SUM(r.received_qty) FROM shipment_po_line_received r WHERE r.item_id = it.id
+        ), 0)
+      )`);
+    }
+
     const where = conditions.join(" AND ");
     const countResult = await this.pool.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM shipments s WHERE ${where}`,
@@ -410,7 +428,7 @@ export class ShipmentRepository {
         s.destination_port_code, s.destination_port_name, s.destination_port_country,
         s.etd, s.eta, s.atd, s.ata, s.depo, s.depo_location, s.current_status, s.closed_at, s.close_reason, s.remarks, s.created_at, s.updated_at,
         s.pib_type, s.no_request_pib, s.ppjk_mkl, s.nopen, s.nopen_date, s.ship_by, s.bl_awb, s.insurance_no, s.coo,
-        s.incoterm_amount, s.cbm, s.net_weight_mt, s.gross_weight_mt, s.bm, s.bm_percentage, s.ppn_percentage, s.pph_percentage, s.kawasan_berikat, s.surveyor, s.product_classification,
+        s.incoterm_amount, s.cbm, s.net_weight_mt, s.gross_weight_mt, s.bm, s.ppn_amount, s.pph_amount, s.kawasan_berikat, s.surveyor, s.product_classification,
         s.unit_20ft, s.unit_40ft, s.unit_package, s.unit_20_iso_tank, s.container_count_20ft, s.container_count_40ft,
         s.package_count, s.container_count_20_iso_tank
        FROM shipments s WHERE ${where} ORDER BY s.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
@@ -635,17 +653,17 @@ export class ShipmentRepository {
       updates.push(`gross_weight_mt = $${idx++}`);
       params.push(dto.gross_weight_mt);
     }
-    if (dto.bm_percentage !== undefined) {
-      updates.push(`bm_percentage = $${idx++}`);
-      params.push(dto.bm_percentage);
+    if (dto.bm !== undefined) {
+      updates.push(`bm = $${idx++}`);
+      params.push(dto.bm);
     }
-    if (dto.ppn_percentage !== undefined) {
-      updates.push(`ppn_percentage = $${idx++}`);
-      params.push(dto.ppn_percentage);
+    if (dto.ppn_amount !== undefined) {
+      updates.push(`ppn_amount = $${idx++}`);
+      params.push(dto.ppn_amount);
     }
-    if (dto.pph_percentage !== undefined) {
-      updates.push(`pph_percentage = $${idx++}`);
-      params.push(dto.pph_percentage);
+    if (dto.pph_amount !== undefined) {
+      updates.push(`pph_amount = $${idx++}`);
+      params.push(dto.pph_amount);
     }
     if (dto.origin_port_name !== undefined) {
       updates.push(`origin_port_name = $${idx++}`);

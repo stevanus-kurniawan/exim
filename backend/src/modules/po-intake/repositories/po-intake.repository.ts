@@ -272,6 +272,23 @@ export class PoIntakeRepository {
       params.push(`%${query.search}%`);
       idx++;
     }
+    if (query.unclaimed_only) {
+      conditions.push(`i.taken_by_user_id IS NULL`);
+    }
+    if (query.detected_older_than_days != null && query.detected_older_than_days > 0) {
+      conditions.push(`i.created_at < NOW() - ($${idx++}::int * INTERVAL '1 day')`);
+      params.push(query.detected_older_than_days);
+    }
+    if (query.has_linked_shipment === false) {
+      conditions.push(
+        `NOT EXISTS (SELECT 1 FROM shipment_po_mapping m WHERE m.intake_id = i.id AND m.decoupled_at IS NULL)`
+      );
+    }
+    if (query.has_linked_shipment === true) {
+      conditions.push(
+        `EXISTS (SELECT 1 FROM shipment_po_mapping m WHERE m.intake_id = i.id AND m.decoupled_at IS NULL)`
+      );
+    }
 
     const where = conditions.join(" AND ");
     const countResult = await this.pool.query<{ count: string }>(

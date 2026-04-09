@@ -1263,6 +1263,22 @@
   min-width: 8.5rem;
 }
 
+.poItemColPct {
+  min-width: 4.25rem;
+  max-width: 5.5rem;
+}
+
+.poItemPctInput {
+  width: 100%;
+  min-width: 3.25rem;
+  max-width: 5rem;
+  font-size: var(--typography-fontSize-small, 13px);
+}
+
+.poItemPctReadonly {
+  font-size: var(--typography-fontSize-small, 13px);
+}
+
 .poItemColUnit {
   white-space: nowrap;
 }
@@ -1892,7 +1908,7 @@
   display: inline-block;
   padding: var(--spacing-1, 4px) var(--spacing-3, 12px);
   font-size: var(--typography-fontSize-small, 14px);
-  font-weight: var(--typography-fontWeight-medium, 500);
+  font-weight: var(--typography-fontWeight-semibold, 600);
   color: var(--color-semantic-primary-default, #c43a31);
   border: 1px solid var(--color-semantic-primary-default, #c43a31);
   border-radius: var(--borderRadius-sm, 6px);
@@ -1902,13 +1918,17 @@
   margin: 0;
 }
 
-.shipmentDocUploadWrap input:disabled + .shipmentDocUploadBtn {
-  cursor: not-allowed;
-  opacity: 0.7;
+.shipmentDocUploadBtn:not(.shipmentDocUploadBtnDisabled):hover {
+  background: var(--color-primitive-background-light, #f4f4f4);
 }
 
-.shipmentDocUploadWrap input:not(:disabled) + .shipmentDocUploadBtn:hover {
-  background: var(--color-primitive-background-light, #f4f4f4);
+/* True disabled: closed shipment or upload in progress — distinct from enabled outline (avoids “washed out” look). */
+.shipmentDocUploadBtnDisabled {
+  cursor: not-allowed;
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  border-color: var(--color-primitive-border-medium, #c4c4c4);
+  background: var(--color-primitive-background-lighter, #fafafa);
+  font-weight: var(--typography-fontWeight-medium, 500);
 }
 
 .shipmentDocFileList {

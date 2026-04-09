@@ -141,17 +141,7 @@ const SHIPMENT_STATUSES = [
   "DELIVERED",
 ];
 
-const DUTY_FORMULA_BM = "BM = BM% × Total Invoice amount.";
-
 const DUTY_FORMULA_PDRI = "PDRI = BM + PPN + PPH.";
-
-function effectivePpnPct(d: ShipmentDetailType): number {
-  return d.ppn_percentage ?? d.duty_percentage_defaults?.ppn ?? 11;
-}
-
-function effectivePphPct(d: ShipmentDetailType): number {
-  return d.pph_percentage ?? d.duty_percentage_defaults?.pph ?? 2.5;
-}
 
 function formatDocumentBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -273,6 +263,15 @@ function parseCommaFormattedDecimal(raw: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** PPN/PPH total (IDR): free-text; empty → 0; invalid → null. */
+function parseDutyTotalAmountInput(raw: string): number | null {
+  const t = stripCommaThousands(raw.trim());
+  if (t === "") return 0;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return roundTo2Decimals(n);
+}
+
 function localTodayYmd(): string {
   const n = new Date();
   const y = n.getFullYear();
@@ -325,6 +324,11 @@ type PoLineItemsEditorBlockProps = {
   isExpanded: boolean;
   poEditReceivedQtyByIntake: Record<string, Record<string, string>>;
   setPoEditReceivedQtyByIntake: Dispatch<SetStateAction<Record<string, Record<string, string>>>>;
+  poEditDutyPctByIntake: Record<string, Record<string, { bm: string; ppn: string; pph: string }>>;
+  setPoEditDutyPctByIntake: Dispatch<
+    SetStateAction<Record<string, Record<string, { bm: string; ppn: string; pph: string }>>>
+  >;
+  dutyCalculationSkipped: boolean;
   /** Editable only during “Update shipment” (draft on client until Save). */
   canEditPoLineFields: boolean;
   /** True while header Save is persisting shipment + linked PO data. */
@@ -341,12 +345,16 @@ function PoLineItemsEditorBlock({
   isExpanded,
   poEditReceivedQtyByIntake,
   setPoEditReceivedQtyByIntake,
+  poEditDutyPctByIntake,
+  setPoEditDutyPctByIntake,
+  dutyCalculationSkipped,
   canEditPoLineFields,
   savingShipmentEdits,
   tableClassName,
   tableWrapperClassName,
 }: PoLineItemsEditorBlockProps) {
   const poDraftReceivedQty = poEditReceivedQtyByIntake[intakeId] ?? {};
+  const poDraftDuty = poEditDutyPctByIntake[intakeId] ?? {};
   const currencyCode = resolvePoCurrencyCode(po, poDetail);
   const currencySymbol = getCurrencySymbol(currencyCode);
   const lineReceivedByItemId = useMemo(() => {
@@ -379,6 +387,9 @@ function PoLineItemsEditorBlock({
               <TableHeaderCell className={styles.poItemColDesc}>Items</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColNum}>Qty</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColRecv}>Qty delivered</TableHeaderCell>
+              <TableHeaderCell className={styles.poItemColPct}>BM %</TableHeaderCell>
+              <TableHeaderCell className={styles.poItemColPct}>PPN %</TableHeaderCell>
+              <TableHeaderCell className={styles.poItemColPct}>PPH %</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColNum}>Remaining qty</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColUnit}>Unit</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColNum}>Price per unit</TableHeaderCell>
@@ -398,6 +409,52 @@ function PoLineItemsEditorBlock({
               const remainingQty = projectedRemainingQtyForShipmentLine(item, savedThisShipmentQty, deliveredQty);
               const unitPrice = Number(item.value ?? 0);
               const amount = (Number.isFinite(unitPrice) ? unitPrice : 0) * deliveredQty;
+              const savedLine = po.line_received?.find((l) => l.item_id === item.id);
+              const pctReadonly = (n: number | null | undefined) =>
+                n != null && Number.isFinite(Number(n)) ? `${formatDecimal(Number(n))}%` : "—";
+              const dutyRow = poDraftDuty[item.id];
+              const pctInput = (key: "bm" | "ppn" | "pph", aria: string) => {
+                if (dutyCalculationSkipped) return <span className={styles.poItemPctReadonly}>—</span>;
+                if (canEditPoLineFields && isExpanded) {
+                  return (
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      className={`${styles.input} ${styles.poItemPctInput}`}
+                      value={dutyRow?.[key] ?? ""}
+                      onChange={(e) =>
+                        setPoEditDutyPctByIntake((prev) => {
+                          const curIntake = prev[intakeId] ?? {};
+                          const curRow = curIntake[item.id] ?? { bm: "", ppn: "", pph: "" };
+                          const nextVal = formatPriceInputWithCommas(e.target.value, 2);
+                          return {
+                            ...prev,
+                            [intakeId]: {
+                              ...curIntake,
+                              [item.id]: {
+                                bm: key === "bm" ? nextVal : curRow.bm,
+                                ppn: key === "ppn" ? nextVal : curRow.ppn,
+                                pph: key === "pph" ? nextVal : curRow.pph,
+                              },
+                            },
+                          };
+                        })
+                      }
+                      placeholder="0"
+                      disabled={savingShipmentEdits}
+                      aria-label={aria}
+                    />
+                  );
+                }
+                const v =
+                  key === "bm"
+                    ? savedLine?.bm_percentage
+                    : key === "ppn"
+                      ? savedLine?.ppn_percentage
+                      : savedLine?.pph_percentage;
+                return <span className={styles.poItemPctReadonly}>{pctReadonly(v)}</span>;
+              };
               return (
                 <TableRow key={item.id}>
                   <TableCell className={styles.poItemColDesc}>{displayPoField(item.item_description)}</TableCell>
@@ -427,6 +484,9 @@ function PoLineItemsEditorBlock({
                       <span className={styles.poItemRecvReadonly}>{formatPoLineQtyDisplay(savedThisShipmentQty)}</span>
                     )}
                   </TableCell>
+                  <TableCell className={styles.poItemColPct}>{pctInput("bm", "BM percent")}</TableCell>
+                  <TableCell className={styles.poItemColPct}>{pctInput("ppn", "PPN percent")}</TableCell>
+                  <TableCell className={styles.poItemColPct}>{pctInput("pph", "PPH percent")}</TableCell>
                   <TableCell className={styles.poItemColNum}>
                     {remainingQty != null ? formatPoLineQtyDisplay(remainingQty) : "—"}
                   </TableCell>
@@ -496,7 +556,11 @@ function ShipmentDocUploadControl({
           e.target.value = "";
         }}
       />
-      <label htmlFor={inputId} className={styles.shipmentDocUploadBtn}>
+      <label
+        htmlFor={inputId}
+        className={[styles.shipmentDocUploadBtn, disabled ? styles.shipmentDocUploadBtnDisabled : ""].filter(Boolean).join(" ")}
+        aria-disabled={disabled}
+      >
         {isUploading ? "Uploading…" : "Upload"}
       </label>
     </span>
@@ -574,12 +638,12 @@ export function ShipmentDetail({ id }: { id: string }) {
   const [editPackageCount, setEditPackageCount] = useState("");
   const [editContainerCount20IsoTank, setEditContainerCount20IsoTank] = useState("");
   const [editIncotermAmount, setEditIncotermAmount] = useState("");
+  const [editBmTotal, setEditBmTotal] = useState("");
+  const [editPpnTotal, setEditPpnTotal] = useState("");
+  const [editPphTotal, setEditPphTotal] = useState("");
   const [editCbm, setEditCbm] = useState("");
   const [editNetWeightMt, setEditNetWeightMt] = useState("");
   const [editGrossWeightMt, setEditGrossWeightMt] = useState("");
-  const [editBmPercentage, setEditBmPercentage] = useState("");
-  const [editPpnPercentage, setEditPpnPercentage] = useState("");
-  const [editPphPercentage, setEditPphPercentage] = useState("");
   const [editClosedAt, setEditClosedAt] = useState("");
   const [bids, setBids] = useState<ShipmentBid[]>([]);
   const [loadingBids, setLoadingBids] = useState(false);
@@ -609,8 +673,14 @@ export function ShipmentDetail({ id }: { id: string }) {
   const [poEditReceivedQtyByIntake, setPoEditReceivedQtyByIntake] = useState<Record<string, Record<string, string>>>(
     {}
   );
+  const [poEditDutyPctByIntake, setPoEditDutyPctByIntake] = useState<
+    Record<string, Record<string, { bm: string; ppn: string; pph: string }>>
+  >({});
   /** Full-bleed width for the linked PO line-items table only (invoice/rate rows stay normal). */
   const [poLineItemsWide, setPoLineItemsWide] = useState(false);
+
+  /** Block shipment document upload/delete when status is DELIVERED (not based on closed/delivered date alone). */
+  const shipmentDocumentsLockedByDeliveredStatus = detail?.current_status === "DELIVERED";
 
   const load = useCallback(() => {
     if (!accessToken || !id) return;
@@ -813,24 +883,12 @@ export function ShipmentDetail({ id }: { id: string }) {
           )
         : ""
     );
+    setEditBmTotal(detail.bm != null && detail.bm !== 0 ? String(detail.bm) : "");
+    setEditPpnTotal(detail.ppn != null && detail.ppn !== 0 ? String(detail.ppn) : "");
+    setEditPphTotal(detail.pph != null && detail.pph !== 0 ? String(detail.pph) : "");
     setEditCbm(detail.cbm != null ? String(detail.cbm) : "");
     setEditNetWeightMt(detail.net_weight_mt != null ? String(detail.net_weight_mt) : "");
     setEditGrossWeightMt(detail.gross_weight_mt != null ? String(detail.gross_weight_mt) : "");
-    setEditBmPercentage(
-      detail.bm_percentage != null
-        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.bm_percentage)).toFixed(2), 2)
-        : ""
-    );
-    setEditPpnPercentage(
-      detail.ppn_percentage != null
-        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.ppn_percentage)).toFixed(2), 2)
-        : ""
-    );
-    setEditPphPercentage(
-      detail.pph_percentage != null
-        ? formatPriceInputWithCommas(roundTo2Decimals(Number(detail.pph_percentage)).toFixed(2), 2)
-        : ""
-    );
     setEditClosedAt(detail.closed_at ? detail.closed_at.slice(0, 10) : "");
     initPoMappingEditsFromDetail(detail);
     {
@@ -1241,7 +1299,7 @@ export function ShipmentDetail({ id }: { id: string }) {
               variant="secondary"
               className={styles.docIconBtn}
               onClick={() => handleShipmentDocumentDelete(doc.id)}
-              disabled={deletingDocId === doc.id || !!detail?.closed_at}
+              disabled={deletingDocId === doc.id || shipmentDocumentsLockedByDeliveredStatus}
               aria-label={deletingDocId === doc.id ? "Removing document" : `Remove ${doc.original_file_name}`}
               title={deletingDocId === doc.id ? "Removing…" : "Remove"}
             >
@@ -1429,12 +1487,6 @@ export function ShipmentDetail({ id }: { id: string }) {
         ? incotermAmtFromEdit
         : detail.incoterm_amount;
 
-    const bmFromEdit = editBmPercentage.trim()
-      ? roundTo2Decimals(Number(stripCommaThousands(editBmPercentage.trim())))
-      : null;
-    const bm_percentage =
-      bmFromEdit != null && Number.isFinite(bmFromEdit) ? bmFromEdit : detail.bm_percentage;
-
     const linkedPosEff = (() => {
       const base = detail.linked_pos ?? [];
       if (base.length === 0) return base;
@@ -1448,6 +1500,14 @@ export function ShipmentDetail({ id }: { id: string }) {
           ? roundTo2Decimals(parsedSharedRate)
           : undefined;
 
+      const parseDraftPct = (raw: string | undefined, fallback: number | null): number | null => {
+        if (raw === undefined) return fallback;
+        const t = stripCommaThousands(raw.trim());
+        if (!t) return null;
+        const n = roundTo2Decimals(Number(t));
+        return Number.isFinite(n) ? n : fallback;
+      };
+
       return base.map((po) => {
         const pd = poDetailsCache[po.intake_id];
         const idr = isCurrencyIdr(resolvePoCurrencyCode(po, pd));
@@ -1457,20 +1517,39 @@ export function ShipmentDetail({ id }: { id: string }) {
         }
 
         const qtyDraft = poEditReceivedQtyByIntake[po.intake_id];
+        const dutyDraft = poEditDutyPctByIntake[po.intake_id];
         let line_received = po.line_received;
-        if (qtyDraft) {
+        if (qtyDraft || dutyDraft) {
           const items = pd?.items ?? [];
           if (items.length > 0) {
-            line_received = items.map((it) => ({
-              item_id: it.id,
-              received_qty: parseDeliveredQtyInput(qtyDraft[it.id] ?? ""),
-              item_description: it.item_description ?? null,
-            }));
+            line_received = items.map((it) => {
+              const saved = po.line_received?.find((l) => l.item_id === it.id);
+              const received_qty =
+                qtyDraft != null
+                  ? parseDeliveredQtyInput(qtyDraft[it.id] ?? "")
+                  : (saved?.received_qty ?? 0);
+              const d = dutyDraft?.[it.id];
+              return {
+                item_id: it.id,
+                received_qty,
+                item_description: it.item_description ?? saved?.item_description ?? null,
+                bm_percentage: d ? parseDraftPct(d.bm, saved?.bm_percentage ?? null) : (saved?.bm_percentage ?? null),
+                ppn_percentage: d ? parseDraftPct(d.ppn, saved?.ppn_percentage ?? null) : (saved?.ppn_percentage ?? null),
+                pph_percentage: d ? parseDraftPct(d.pph, saved?.pph_percentage ?? null) : (saved?.pph_percentage ?? null),
+              };
+            });
           } else if (line_received && line_received.length > 0) {
-            line_received = line_received.map((l) => ({
-              ...l,
-              received_qty: parseDeliveredQtyInput(qtyDraft[l.item_id] ?? ""),
-            }));
+            line_received = line_received.map((l) => {
+              const d = dutyDraft?.[l.item_id];
+              return {
+                ...l,
+                received_qty:
+                  qtyDraft != null ? parseDeliveredQtyInput(qtyDraft[l.item_id] ?? "") : l.received_qty,
+                bm_percentage: d ? parseDraftPct(d.bm, l.bm_percentage ?? null) : l.bm_percentage,
+                ppn_percentage: d ? parseDraftPct(d.ppn, l.ppn_percentage ?? null) : l.ppn_percentage,
+                pph_percentage: d ? parseDraftPct(d.pph, l.pph_percentage ?? null) : l.pph_percentage,
+              };
+            });
           }
         }
 
@@ -1502,7 +1581,6 @@ export function ShipmentDetail({ id }: { id: string }) {
       ata: editAta.trim() || detail.ata,
       nopen: editNopen.trim() || detail.nopen,
       nopen_date: editNopenDate.trim() || detail.nopen_date,
-      bm_percentage,
       closed_at: editClosedAt.trim() || detail.closed_at,
       linked_pos: linkedPosEff,
     };
@@ -1526,7 +1604,6 @@ export function ShipmentDetail({ id }: { id: string }) {
     editSurveyor,
     editDestinationPortName,
     editIncotermAmount,
-    editBmPercentage,
     editAtd,
     editBlAwb,
     editNoRequestPib,
@@ -1537,6 +1614,7 @@ export function ShipmentDetail({ id }: { id: string }) {
     editClosedAt,
     poEditCurrencyRateByIntake,
     poEditReceivedQtyByIntake,
+    poEditDutyPctByIntake,
     poDetailsCache,
   ]);
 
@@ -1615,6 +1693,15 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   const dutyCalculationSkipped = useMemo(() => isPibTypeBc23(pibTypeForDutyRules), [pibTypeForDutyRules]);
 
+  const previewPdriWhileEditing = useMemo(() => {
+    if (!detail || dutyCalculationSkipped || !isUpdatingShipment) return null;
+    const bm = parseDutyTotalAmountInput(editBmTotal);
+    const ppn = parseDutyTotalAmountInput(editPpnTotal);
+    const pph = parseDutyTotalAmountInput(editPphTotal);
+    if (bm === null || ppn === null || pph === null) return null;
+    return roundTo2Decimals(bm + ppn + pph);
+  }, [detail, dutyCalculationSkipped, isUpdatingShipment, editBmTotal, editPpnTotal, editPphTotal]);
+
   const requiredFieldsForStatusUpdate = useMemo(() => {
     if (!detailForStatusValidation || !newStatus.trim()) return [] as string[];
     return getRequiredFieldsForTransition(
@@ -1642,7 +1729,12 @@ export function ShipmentDetail({ id }: { id: string }) {
 
   const linkedPoHighlightClass = useMemo(() => {
     if (!newStatus.trim()) return "";
-    const keys = ["has_linked_po", "has_received_this_shipment", "has_currency_rate"] as const;
+    const keys = [
+      "has_linked_po",
+      "has_received_this_shipment",
+      "has_currency_rate",
+      "line_duty_percentages",
+    ] as const;
     if (!keys.some((k) => requiredForUpdateSet.has(k) && missingForUpdateSet.has(k))) return "";
     return `${styles.statusHighlightBlock} ${styles.statusHighlightBlockMissing}`;
   }, [newStatus, requiredForUpdateSet, missingForUpdateSet]);
@@ -1663,12 +1755,22 @@ export function ShipmentDetail({ id }: { id: string }) {
   }, [newStatus, requiredForUpdateSet, missingForUpdateSet]);
 
   const poLineItemsToolbarClass = useMemo(() => {
-    if (!newStatus.trim() || !requiredForUpdateSet.has("has_received_this_shipment")) return styles.poLineItemsToolbar;
-    const miss = missingForUpdateSet.has("has_received_this_shipment");
-    return [styles.poLineItemsToolbar, miss ? styles.statusFieldRequired : "", miss ? styles.statusFieldRequiredMissing : ""]
+    if (!newStatus.trim()) return styles.poLineItemsToolbar;
+    const missRecv =
+      requiredForUpdateSet.has("has_received_this_shipment") && missingForUpdateSet.has("has_received_this_shipment");
+    const missDuty =
+      requiredForUpdateSet.has("line_duty_percentages") && missingForUpdateSet.has("line_duty_percentages");
+    if (!missRecv && !missDuty) return styles.poLineItemsToolbar;
+    return [styles.poLineItemsToolbar, styles.statusFieldRequired, styles.statusFieldRequiredMissing]
       .filter(Boolean)
       .join(" ");
   }, [newStatus, requiredForUpdateSet, missingForUpdateSet]);
+
+  const poLineToolbarDataStatusField = useMemo(() => {
+    return (["line_duty_percentages", "has_received_this_shipment"] as const).find(
+      (k) => requiredForUpdateSet.has(k) && missingForUpdateSet.has(k)
+    );
+  }, [requiredForUpdateSet, missingForUpdateSet]);
 
   const scrollToStatusRequirement = useCallback(
     (fieldKey: string, opts?: { afterTabSwitch?: boolean }) => {
@@ -1693,7 +1795,12 @@ export function ShipmentDetail({ id }: { id: string }) {
       window.setTimeout(() => scrollToStatusRequirement(fieldKey, { afterTabSwitch: true }), 150);
       return;
     }
-    const poKeys = ["has_linked_po", "has_received_this_shipment", "has_currency_rate"];
+    const poKeys = [
+      "has_linked_po",
+      "has_received_this_shipment",
+      "has_currency_rate",
+      "line_duty_percentages",
+    ];
     if (poKeys.includes(fieldKey)) {
       document.getElementById("section-arrival-customs")?.scrollIntoView({ behavior: "smooth", block: "start" });
       window.requestAnimationFrame(() => {
@@ -1837,15 +1944,53 @@ export function ShipmentDetail({ id }: { id: string }) {
     [detail, linkedPoByIntake, poDetailsCache, poEditReceivedQtyByIntake]
   );
 
+  const syncPoEditDutyStateFromExpandedPo = useCallback(
+    (poIntakeId: string | null) => {
+      if (!poIntakeId || !detail) return;
+      if (poEditDutyPctByIntake[poIntakeId]) return;
+      const po = linkedPoByIntake[poIntakeId];
+      if (!po) return;
+      const fmt = (n: number | null | undefined) =>
+        n != null && Number.isFinite(Number(n))
+          ? formatPriceInputWithCommas(roundTo2Decimals(Number(n)).toFixed(2), 2)
+          : "";
+      const next: Record<string, { bm: string; ppn: string; pph: string }> = {};
+      const items = poDetailsCache[poIntakeId]?.items ?? [];
+      for (const it of items) {
+        const saved = po.line_received?.find((l) => l.item_id === it.id);
+        next[it.id] = {
+          bm: fmt(saved?.bm_percentage ?? null),
+          ppn: fmt(saved?.ppn_percentage ?? null),
+          pph: fmt(saved?.pph_percentage ?? null),
+        };
+      }
+      (po.line_received ?? []).forEach((l) => {
+        if (!next[l.item_id]) {
+          next[l.item_id] = {
+            bm: fmt(l.bm_percentage),
+            ppn: fmt(l.ppn_percentage),
+            pph: fmt(l.pph_percentage),
+          };
+        }
+      });
+      setPoEditDutyPctByIntake((prev) => ({ ...prev, [poIntakeId]: next }));
+    },
+    [detail, linkedPoByIntake, poDetailsCache, poEditDutyPctByIntake]
+  );
+
   useEffect(() => {
-    expandedPoIds.forEach((poIntakeId) => syncPoEditStateFromExpandedPo(poIntakeId));
-  }, [expandedPoIds, detail?.linked_pos, syncPoEditStateFromExpandedPo]);
+    expandedPoIds.forEach((poIntakeId) => {
+      syncPoEditStateFromExpandedPo(poIntakeId);
+      syncPoEditDutyStateFromExpandedPo(poIntakeId);
+    });
+  }, [expandedPoIds, detail?.linked_pos, syncPoEditStateFromExpandedPo, syncPoEditDutyStateFromExpandedPo]);
 
   function cancelUpdateMode() {
     setIsUpdatingShipment(false);
     setEditForwarderPick("");
     if (detail) initPoMappingEditsFromDetail(detail);
     setPoEditReceivedQtyByIntake({});
+    setPoEditDutyPctByIntake({});
   }
 
   /** Persists invoice no. and currency rate for every linked PO (after shipment header save). */
@@ -1913,24 +2058,49 @@ export function ShipmentDetail({ id }: { id: string }) {
   async function persistEditedPoLines(linkedPos: ShipmentDetailType["linked_pos"]): Promise<boolean> {
     if (!accessToken || !id || !canEditShipment) return true;
     try {
-      const targetIntakeIds = linkedPos
+      const fromQty = linkedPos
         .map((po) => po.intake_id)
         .filter((intakeId) => poEditReceivedQtyByIntake[intakeId] != null);
+      const fromDuty = linkedPos
+        .map((po) => po.intake_id)
+        .filter((intakeId) => poEditDutyPctByIntake[intakeId] != null);
+      const targetIntakeIds = [...new Set([...fromQty, ...fromDuty])];
       for (const intakeId of targetIntakeIds) {
         const po = linkedPoByIntake[intakeId];
         if (!po) continue;
         const items = poDetailsCache[intakeId]?.items ?? [];
         if (items.length === 0) continue;
         const poDraft = poEditReceivedQtyByIntake[intakeId] ?? {};
+        const dutyDraft = poEditDutyPctByIntake[intakeId] ?? {};
+        const parseLinePct = (raw: string | undefined, fallback: number | null): number | null => {
+          if (raw === undefined) return fallback;
+          const t = stripCommaThousands(raw.trim());
+          if (!t) return null;
+          const n = roundTo2Decimals(Number(t));
+          return Number.isFinite(n) ? n : fallback;
+        };
         const lines: {
           item_id: string;
           received_qty: number;
           net_weight_mt: number | null;
           gross_weight_mt: number | null;
+          bm_percentage: number | null;
+          ppn_percentage: number | null;
+          pph_percentage: number | null;
         }[] = [];
         for (const item of items) {
           const received_qty = parseDeliveredQtyInput(poDraft[item.id] ?? "");
-          lines.push({ item_id: item.id, received_qty, net_weight_mt: null, gross_weight_mt: null });
+          const savedLine = po.line_received?.find((l) => l.item_id === item.id);
+          const dRow = dutyDraft[item.id];
+          lines.push({
+            item_id: item.id,
+            received_qty,
+            net_weight_mt: null,
+            gross_weight_mt: null,
+            bm_percentage: dRow ? parseLinePct(dRow.bm, savedLine?.bm_percentage ?? null) : (savedLine?.bm_percentage ?? null),
+            ppn_percentage: dRow ? parseLinePct(dRow.ppn, savedLine?.ppn_percentage ?? null) : (savedLine?.ppn_percentage ?? null),
+            pph_percentage: dRow ? parseLinePct(dRow.pph, savedLine?.pph_percentage ?? null) : (savedLine?.pph_percentage ?? null),
+          });
         }
         const linesRes = await updateShipmentPoLines(id, intakeId, lines, accessToken);
         if (isApiError(linesRes)) {
@@ -2032,30 +2202,6 @@ export function ShipmentDetail({ id }: { id: string }) {
       containerCount20Iso = v;
     }
 
-    const pibForSave = editPibType.trim() || detail.pib_type;
-    if (!isPibTypeBc23(pibForSave)) {
-      if (editPpnPercentage.trim()) {
-        const n = Number(stripCommaThousands(editPpnPercentage.trim()));
-        if (!Number.isFinite(n) || n < 0 || n > 100) {
-          const msg = "PPN percentage must be between 0 and 100.";
-          setActionError(msg);
-          pushToast(msg, "error");
-          setSavingDetails(false);
-          return;
-        }
-      }
-      if (editPphPercentage.trim()) {
-        const n = Number(stripCommaThousands(editPphPercentage.trim()));
-        if (!Number.isFinite(n) || n < 0 || n > 100) {
-          const msg = "PPH percentage must be between 0 and 100.";
-          setActionError(msg);
-          pushToast(msg, "error");
-          setSavingDetails(false);
-          return;
-        }
-      }
-    }
-
     const sb = sea ? editShipBy.trim() : "";
     if (sea && !sb) {
       const msg = "Ship by is required when Ship via is Sea.";
@@ -2063,6 +2209,33 @@ export function ShipmentDetail({ id }: { id: string }) {
       pushToast(msg, "error");
       setSavingDetails(false);
       return;
+    }
+
+    if (!dutyCalculationSkipped) {
+      const bmAmt = parseDutyTotalAmountInput(editBmTotal);
+      const ppnAmt = parseDutyTotalAmountInput(editPpnTotal);
+      const pphAmt = parseDutyTotalAmountInput(editPphTotal);
+      if (bmAmt === null) {
+        const msg = "BM (total) must be a non-negative number.";
+        setActionError(msg);
+        pushToast(msg, "error");
+        setSavingDetails(false);
+        return;
+      }
+      if (ppnAmt === null) {
+        const msg = "PPN (total) must be a non-negative number.";
+        setActionError(msg);
+        pushToast(msg, "error");
+        setSavingDetails(false);
+        return;
+      }
+      if (pphAmt === null) {
+        const msg = "PPH (total) must be a non-negative number.";
+        setActionError(msg);
+        pushToast(msg, "error");
+        setSavingDetails(false);
+        return;
+      }
     }
 
     const unitFields = !sea
@@ -2165,21 +2338,14 @@ export function ShipmentDetail({ id }: { id: string }) {
             : null,
       net_weight_mt: editNetWeightMt.trim() ? Number(editNetWeightMt) : undefined,
       gross_weight_mt: editGrossWeightMt.trim() ? Number(editGrossWeightMt) : undefined,
-      bm_percentage:
-        isPibTypeBc23(editPibType.trim() || detail.pib_type) || !editBmPercentage.trim()
-          ? undefined
-          : roundTo2Decimals(Number(stripCommaThousands(editBmPercentage.trim()))),
-      ppn_percentage: isPibTypeBc23(editPibType.trim() || detail.pib_type)
-        ? undefined
-        : !editPpnPercentage.trim()
-          ? null
-          : roundTo2Decimals(Number(stripCommaThousands(editPpnPercentage.trim()))),
-      pph_percentage: isPibTypeBc23(editPibType.trim() || detail.pib_type)
-        ? undefined
-        : !editPphPercentage.trim()
-          ? null
-          : roundTo2Decimals(Number(stripCommaThousands(editPphPercentage.trim()))),
       closed_at: editClosedAt.trim() || undefined,
+      ...(!dutyCalculationSkipped
+        ? {
+            bm: parseDutyTotalAmountInput(editBmTotal) ?? 0,
+            ppn_amount: parseDutyTotalAmountInput(editPpnTotal) ?? 0,
+            pph_amount: parseDutyTotalAmountInput(editPphTotal) ?? 0,
+          }
+        : {}),
     };
     try {
       const res = await updateShipment(id, payload, accessToken);
@@ -2262,9 +2428,7 @@ export function ShipmentDetail({ id }: { id: string }) {
       fieldKey === "nopen_date" ||
       fieldKey === "incoterm_amount" ||
       fieldKey === "cbm" ||
-      fieldKey === "bm_percentage" ||
-      fieldKey === "ppn_percentage" ||
-      fieldKey === "pph_percentage" ||
+      fieldKey === "line_duty_percentages" ||
       fieldKey === "has_currency_rate" ||
       fieldKey === "has_received_this_shipment" ||
       fieldKey === "has_linked_po"
@@ -2697,7 +2861,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         )}
 
       <div className={styles.detailLayout}>
-        <div className={styles.detailMain}>
+        <div className={styles.detailMain} data-tour="shipment-main-form">
       <Card id="section-pre-shipment" className={`${styles.card} ${styles.sectionScrollTarget}`}>
         <h2 className={styles.categoryTitle}>Pre Shipment</h2>
 
@@ -3405,120 +3569,78 @@ export function ShipmentDetail({ id }: { id: string }) {
               PIB type BC 2.3: BM, PPN, PPH, and PDRI are not calculated for this shipment.
             </p>
           ) : null}
-          <div className={statusFieldClass("bm_percentage")} data-status-field="bm_percentage">
-            <span className={styles.fieldLabel}>
-              BM percentage (%)
-              {dutyCalculationSkipped ? " — not used for BC 2.3" : ""}
-            </span>
-            {isUpdatingShipment ? (
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>BM (total)</span>
+            {dutyCalculationSkipped ? (
+              <span className={styles.fieldValue}>—</span>
+            ) : isUpdatingShipment ? (
               <input
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
                 className={styles.input}
-                value={editBmPercentage}
-                onChange={(e) => setEditBmPercentage(formatPriceInputWithCommas(e.target.value, 2))}
-                placeholder={dutyCalculationSkipped ? "N/A for BC 2.3" : "e.g. 7.5"}
-                aria-label="BM percentage"
-                disabled={dutyCalculationSkipped}
+                value={editBmTotal}
+                onChange={(e) => setEditBmTotal(e.target.value)}
+                placeholder="IDR amount"
+                disabled={!canEditShipment || savingDetails}
+                aria-label="BM total amount"
               />
             ) : (
-              <span className={styles.fieldValue}>
-                {dutyCalculationSkipped ? "—" : detail.bm_percentage != null ? `${formatDecimal(detail.bm_percentage)}%` : "—"}
-              </span>
+              <span className={styles.fieldValue}>{formatRupiah(detail.bm)}</span>
             )}
           </div>
           <div className={styles.field}>
-            <span className={styles.fieldLabel}>PPN percentage (%)</span>
-            {isUpdatingShipment ? (
+            <span className={styles.fieldLabel}>PPN (total)</span>
+            {dutyCalculationSkipped ? (
+              <span className={styles.fieldValue}>—</span>
+            ) : isUpdatingShipment ? (
               <input
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
                 className={styles.input}
-                value={editPpnPercentage}
-                onChange={(e) => setEditPpnPercentage(formatPriceInputWithCommas(e.target.value, 2))}
-                placeholder={
-                  dutyCalculationSkipped
-                    ? "N/A for BC 2.3"
-                    : `e.g. ${formatDecimal(detail.duty_percentage_defaults?.ppn ?? 11)} (system default if empty)`
-                }
-                aria-label="PPN percentage"
-                disabled={dutyCalculationSkipped}
+                value={editPpnTotal}
+                onChange={(e) => setEditPpnTotal(e.target.value)}
+                placeholder="IDR amount"
+                disabled={!canEditShipment || savingDetails}
+                aria-label="PPN total amount"
               />
             ) : (
-              <span className={styles.fieldValue}>
-                {dutyCalculationSkipped
-                  ? "—"
-                  : detail.ppn_percentage != null
-                    ? `${formatDecimal(detail.ppn_percentage)}%`
-                    : `${formatDecimal(effectivePpnPct(detail))}% (system default)`}
-              </span>
+              <span className={styles.fieldValue}>{formatRupiah(detail.ppn)}</span>
             )}
           </div>
           <div className={styles.field}>
-            <span className={styles.fieldLabel}>PPH percentage (%)</span>
-            {isUpdatingShipment ? (
+            <span className={styles.fieldLabel}>PPH (total)</span>
+            {dutyCalculationSkipped ? (
+              <span className={styles.fieldValue}>—</span>
+            ) : isUpdatingShipment ? (
               <input
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
                 className={styles.input}
-                value={editPphPercentage}
-                onChange={(e) => setEditPphPercentage(formatPriceInputWithCommas(e.target.value, 2))}
-                placeholder={
-                  dutyCalculationSkipped
-                    ? "N/A for BC 2.3"
-                    : `e.g. ${formatDecimal(detail.duty_percentage_defaults?.pph ?? 2.5)} (system default if empty)`
-                }
-                aria-label="PPH percentage"
-                disabled={dutyCalculationSkipped}
+                value={editPphTotal}
+                onChange={(e) => setEditPphTotal(e.target.value)}
+                placeholder="IDR amount"
+                disabled={!canEditShipment || savingDetails}
+                aria-label="PPH total amount"
               />
             ) : (
-              <span className={styles.fieldValue}>
-                {dutyCalculationSkipped
-                  ? "—"
-                  : detail.pph_percentage != null
-                    ? `${formatDecimal(detail.pph_percentage)}%`
-                    : `${formatDecimal(effectivePphPct(detail))}% (system default)`}
-              </span>
+              <span className={styles.fieldValue}>{formatRupiah(detail.pph)}</span>
             )}
-          </div>
-          <div className={styles.field}>
-            <span className={styles.dutyFieldLabelRow}>
-              <span className={styles.fieldLabel}>BM (Bea Masuk)</span>
-              {!dutyCalculationSkipped ? <DutyFormulaHint text={DUTY_FORMULA_BM} /> : null}
-            </span>
-            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.bm)}</span>
-          </div>
-          <div className={styles.field}>
-            <span className={styles.dutyFieldLabelRow}>
-              <span className={styles.fieldLabel}>PPN</span>
-              {!dutyCalculationSkipped ? (
-                <DutyFormulaHint
-                  text={`PPN = ${formatDecimal(effectivePpnPct(detail))}% × (Total Invoice amount + BM). Rate is the PPN percentage above, or the system default when that field is left empty.`}
-                />
-              ) : null}
-            </span>
-            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.ppn)}</span>
-          </div>
-          <div className={styles.field}>
-            <span className={styles.dutyFieldLabelRow}>
-              <span className={styles.fieldLabel}>PPH</span>
-              {!dutyCalculationSkipped ? (
-                <DutyFormulaHint
-                  text={`PPH = ${formatDecimal(effectivePphPct(detail))}% × (Total Invoice amount + BM). Rate is the PPH percentage above, or the system default when that field is left empty.`}
-                />
-              ) : null}
-            </span>
-            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.pph)}</span>
           </div>
           <div className={styles.field}>
             <span className={styles.dutyFieldLabelRow}>
               <span className={styles.fieldLabel}>PDRI (Pajak Dalam Rangka Impor)</span>
               {!dutyCalculationSkipped ? <DutyFormulaHint text={DUTY_FORMULA_PDRI} /> : null}
             </span>
-            <span className={styles.fieldValue}>{dutyCalculationSkipped ? "—" : formatRupiah(detail.pdri)}</span>
+            <span className={styles.fieldValue}>
+              {dutyCalculationSkipped
+                ? "—"
+                : formatRupiah(
+                    isUpdatingShipment && previewPdriWhileEditing != null ? previewPdriWhileEditing : detail.pdri
+                  )}
+            </span>
           </div>
         </div>
 
@@ -3526,9 +3648,14 @@ export function ShipmentDetail({ id }: { id: string }) {
           id="shipment-highlight-linked-po"
           className={`${styles.linkedPoHighlightWrap} ${linkedPoHighlightClass}`.trim()}
           data-status-field={
-            (["has_linked_po", "has_received_this_shipment", "has_currency_rate"] as const).find((k) =>
-              requiredForUpdateSet.has(k)
-            )
+            (
+              [
+                "has_linked_po",
+                "has_received_this_shipment",
+                "has_currency_rate",
+                "line_duty_percentages",
+              ] as const
+            ).find((k) => requiredForUpdateSet.has(k))
           }
         >
         <h3 className={styles.subsectionTitle}>Group PO</h3>
@@ -3654,7 +3781,10 @@ export function ShipmentDetail({ id }: { id: string }) {
                             </>
                           ) : (
                             <>
-                              <div className={poLineItemsToolbarClass} data-status-field="has_received_this_shipment">
+                              <div
+                                className={poLineItemsToolbarClass}
+                                data-status-field={poLineToolbarDataStatusField}
+                              >
                                 <span className={styles.poLineItemsToolbarLabel}>PO line items</span>
                                 <Button
                                   type="button"
@@ -3698,6 +3828,9 @@ export function ShipmentDetail({ id }: { id: string }) {
                                     isExpanded={isExpanded}
                                     poEditReceivedQtyByIntake={poEditReceivedQtyByIntake}
                                     setPoEditReceivedQtyByIntake={setPoEditReceivedQtyByIntake}
+                                    poEditDutyPctByIntake={poEditDutyPctByIntake}
+                                    setPoEditDutyPctByIntake={setPoEditDutyPctByIntake}
+                                    dutyCalculationSkipped={dutyCalculationSkipped}
                                     canEditPoLineFields={canEditShipment && isUpdatingShipment}
                                     savingShipmentEdits={savingDetails}
                                     tableClassName={styles.poItemsTable}
@@ -3760,6 +3893,9 @@ export function ShipmentDetail({ id }: { id: string }) {
                   isExpanded={true}
                   poEditReceivedQtyByIntake={poEditReceivedQtyByIntake}
                   setPoEditReceivedQtyByIntake={setPoEditReceivedQtyByIntake}
+                  poEditDutyPctByIntake={poEditDutyPctByIntake}
+                  setPoEditDutyPctByIntake={setPoEditDutyPctByIntake}
+                  dutyCalculationSkipped={dutyCalculationSkipped}
                   canEditPoLineFields={canEditShipment && isUpdatingShipment}
                   savingShipmentEdits={savingDetails}
                   tableClassName={`${styles.poItemsTable} ${styles.poItemsTableWideOverlay}`.trim()}
@@ -3791,7 +3927,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         )}
       </Card>
 
-      <Card id="section-notes" className={`${styles.card} ${styles.sectionScrollTarget}`}>
+      <Card id="section-notes" className={`${styles.card} ${styles.sectionScrollTarget}`} data-tour="shipment-notes">
         <h2 className={styles.categoryTitle}>Notes</h2>
         {canEditShipment ? (
           <form onSubmit={handleAddShipmentNote} className={styles.noteComposer}>
@@ -3837,12 +3973,14 @@ export function ShipmentDetail({ id }: { id: string }) {
         </div>
         <aside className={styles.detailSidebar}>
       <Card className={styles.card}>
-        <h2 className={styles.sectionTitle}>Status timeline</h2>
-        <Timeline
-          items={steppedTimeline}
-          formatDate={(iso) => (iso ? formatDate(iso) : "—")}
-        />
-        <div className={styles.timelineUpdateSection}>
+        <div data-tour="shipment-status-timeline">
+          <h2 className={styles.sectionTitle}>Status timeline</h2>
+          <Timeline
+            items={steppedTimeline}
+            formatDate={(iso) => (iso ? formatDate(iso) : "—")}
+          />
+        </div>
+        <div className={styles.timelineUpdateSection} data-tour="shipment-update-status">
           <h3 className={styles.timelineUpdateTitle}>Update status</h3>
           {canUpdateStatus ? (
             <>
@@ -3937,7 +4075,7 @@ export function ShipmentDetail({ id }: { id: string }) {
         </div>
       </Card>
 
-      <Card className={styles.card} id="section-shipment-documents">
+      <Card className={styles.card} id="section-shipment-documents" data-tour="shipment-documents">
         <h2 className={styles.sectionTitle}>Documents</h2>
         <div className={styles.shipmentDocCategories}>
           {getVisibleShipmentDocumentSlots(detail).map((slot) => {
@@ -3977,7 +4115,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                               <span className={styles.shipmentDocStatusLabel}>PO {display(po.po_number)}</span>
                               {canUploadDocument && (
                                 <ShipmentDocUploadControl
-                                  disabled={uploadingDocSlotKey === slotKey || !!detail?.closed_at}
+                                  disabled={uploadingDocSlotKey === slotKey || shipmentDocumentsLockedByDeliveredStatus}
                                   isUploading={uploadingDocSlotKey === slotKey}
                                   onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f, po.intake_id)}
                                 />
@@ -4015,7 +4153,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                           <span className={styles.shipmentDocStatusLabel}>{st === "DRAFT" ? "Draft" : "Final"}</span>
                           {canUploadDocument && (
                             <ShipmentDocUploadControl
-                              disabled={uploadingDocSlotKey === slotKey || !!detail?.closed_at}
+                              disabled={uploadingDocSlotKey === slotKey || shipmentDocumentsLockedByDeliveredStatus}
                               isUploading={uploadingDocSlotKey === slotKey}
                               onFile={(f) => handleShipmentDocumentUpload(slot.document_type, st, f)}
                             />
@@ -4033,7 +4171,8 @@ export function ShipmentDetail({ id }: { id: string }) {
                     {canUploadDocument && (
                       <ShipmentDocUploadControl
                         disabled={
-                          uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) || !!detail?.closed_at
+                          uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) ||
+                          shipmentDocumentsLockedByDeliveredStatus
                         }
                         isUploading={uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null)}
                         onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f)}

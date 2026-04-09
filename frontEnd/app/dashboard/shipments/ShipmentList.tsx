@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RotateCw } from "lucide-react";
+import { RotateCw, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useTableColumnVisibility, type TableColumnDef } from "@/hooks/use-table-column-visibility";
 import { listShipments, getShipmentListFilterOptions } from "@/services/shipments-service";
@@ -25,6 +25,11 @@ import { displayPibTypeLabel } from "@/lib/pib-type-label";
 import { displayProductClassification } from "@/lib/product-classification";
 import { formatStatusLabel } from "@/lib/status-badge";
 import { shipmentTimelineStatusTone } from "@/lib/shipment-timeline-status";
+import { MANAGERIAL_LIST_FILTERS } from "@/lib/managerial-deep-link";
+import {
+  PERFORMANCE_ETA_LATE_QUERY_PARAM,
+  PERFORMANCE_STATUS_QUERY_PARAM,
+} from "@/lib/shipment-performance-deep-link";
 import type { ShipmentListItem, ShipmentListLinkedPo, ShipmentListFilterOptions, ListShipmentsQuery } from "@/types/shipments";
 import { formatDayMonthYear } from "@/lib/format-date";
 import type { ApiSuccess } from "@/types/api";
@@ -140,6 +145,12 @@ export function ShipmentList() {
   const searchFromUrl = searchParams.get("search") ?? "";
   const poFromUrl = (searchParams.get("po_from_date") ?? "").trim();
   const poToUrl = (searchParams.get("po_to_date") ?? "").trim();
+  const managerialFilter = searchParams.get("filter");
+  const managerialDays = searchParams.get("days");
+  const performanceStatusRaw = (searchParams.get(PERFORMANCE_STATUS_QUERY_PARAM) ?? "").trim() || undefined;
+  const performanceEtaLate =
+    searchParams.get(PERFORMANCE_ETA_LATE_QUERY_PARAM) === "true" ||
+    searchParams.get(PERFORMANCE_ETA_LATE_QUERY_PARAM) === "1";
   const { accessToken } = useAuth();
   const { visibleById, toggleColumn, resetColumns, columns: shipmentColumnDefs } = useTableColumnVisibility(
     SHIPMENT_LIST_TABLE_COLUMNS_KEY,
@@ -211,17 +222,25 @@ export function ShipmentList() {
     }
     setLoading(true);
     const fromCols = buildListQueryFromColumnFilters(columnFilters, statusLabelToRaw);
-    listShipments(
-      {
-        page,
-        limit: DEFAULT_LIMIT,
-        search: searchParam.trim() || undefined,
-        po_from_date: poFromUrl || undefined,
-        po_to_date: poToUrl || undefined,
-        ...fromCols,
-      },
-      accessToken
-    )
+    const dormantDays = Math.max(1, parseInt(managerialDays || "30", 10) || 30);
+    const listQuery: ListShipmentsQuery = {
+      page,
+      limit: DEFAULT_LIMIT,
+      search: searchParam.trim() || undefined,
+      po_from_date: poFromUrl || undefined,
+      po_to_date: poToUrl || undefined,
+      ...(managerialFilter === MANAGERIAL_LIST_FILTERS.dormantRemaining
+        ? { dormant_remaining_qty: true, dormant_days: dormantDays }
+        : {}),
+      ...fromCols,
+    };
+    if (performanceStatusRaw && (!fromCols.statuses || fromCols.statuses.length === 0)) {
+      listQuery.statuses = [performanceStatusRaw];
+    }
+    if (performanceEtaLate) {
+      listQuery.performance_eta_late = true;
+    }
+    listShipments(listQuery, accessToken)
       .then((res) => {
         if (isApiError(res)) {
           setError(res.message);
@@ -235,7 +254,19 @@ export function ShipmentList() {
       })
       .catch(() => setError("Failed to load shipments"))
       .finally(() => setLoading(false));
-  }, [accessToken, page, searchParam, poFromUrl, poToUrl, columnFiltersKey, statusLabelToRaw]);
+  }, [
+    accessToken,
+    page,
+    searchParam,
+    poFromUrl,
+    poToUrl,
+    managerialFilter,
+    managerialDays,
+    performanceStatusRaw,
+    performanceEtaLate,
+    columnFiltersKey,
+    statusLabelToRaw,
+  ]);
 
   useEffect(() => {
     fetchList();
@@ -260,6 +291,51 @@ export function ShipmentList() {
     setPoToInput(poToUrl);
     setPage(1);
   }, [poFromUrl, poToUrl]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [managerialFilter, managerialDays]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [performanceStatusRaw]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [performanceEtaLate]);
+
+  useEffect(() => {
+    if (!performanceStatusRaw || !filterOptions?.statuses?.includes(performanceStatusRaw)) return;
+    const label = formatStatusLabel(performanceStatusRaw);
+    setColumnFilters((prev) => {
+      if (prev.status?.length === 1 && prev.status[0] === label) return prev;
+      return { ...prev, status: [label] };
+    });
+  }, [performanceStatusRaw, filterOptions]);
+
+  const clearManagerialShipmentFilter = useCallback(() => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("filter");
+    p.delete("days");
+    router.replace(`/dashboard/shipments${p.toString() ? `?${p.toString()}` : ""}`, { scroll: false });
+  }, [router, searchParams]);
+
+  const clearPerformanceStatusFilter = useCallback(() => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete(PERFORMANCE_STATUS_QUERY_PARAM);
+    router.replace(`/dashboard/shipments${p.toString() ? `?${p.toString()}` : ""}`, { scroll: false });
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      delete next.status;
+      return next;
+    });
+  }, [router, searchParams]);
+
+  const clearPerformanceEtaLateFilter = useCallback(() => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete(PERFORMANCE_ETA_LATE_QUERY_PARAM);
+    router.replace(`/dashboard/shipments${p.toString() ? `?${p.toString()}` : ""}`, { scroll: false });
+  }, [router, searchParams]);
 
   const syncPoDatesToUrl = useCallback(
     (from: string, to: string) => {
@@ -312,6 +388,20 @@ export function ShipmentList() {
   function setColumnFilter(key: string, nextSelected: string[]) {
     setColumnFilters((prev) => ({ ...prev, [key]: nextSelected }));
     setPage(1);
+    const fk = columnFilterStateKey(key);
+    const p = new URLSearchParams(searchParams.toString());
+    let changed = false;
+    if (fk === "status" && performanceStatusRaw) {
+      p.delete(PERFORMANCE_STATUS_QUERY_PARAM);
+      changed = true;
+    }
+    if (performanceEtaLate) {
+      p.delete(PERFORMANCE_ETA_LATE_QUERY_PARAM);
+      changed = true;
+    }
+    if (changed) {
+      router.replace(`/dashboard/shipments${p.toString() ? `?${p.toString()}` : ""}`, { scroll: false });
+    }
   }
 
   function statusBadgeClass(status: string | null | undefined): string {
@@ -540,7 +630,7 @@ export function ShipmentList() {
           </form>
         }
         filters={
-          <div className={styles.filterBar}>
+          <div className={styles.filterBar} data-tour="shipment-po-date-filter">
             <span className={styles.filterLabel}>PO date</span>
             <label className={styles.dateField}>
               <span className={styles.dateFieldLabel}>From</span>
@@ -586,6 +676,53 @@ export function ShipmentList() {
         }
       />
 
+      {(managerialFilter === MANAGERIAL_LIST_FILTERS.dormantRemaining ||
+        performanceStatusRaw ||
+        performanceEtaLate) && (
+        <div className={styles.filterChipsBar}>
+          {managerialFilter === MANAGERIAL_LIST_FILTERS.dormantRemaining && (
+            <span className={styles.filterChip}>
+              Dormant: remaining PO line qty, shipment last updated &gt;{" "}
+              {Math.max(1, parseInt(managerialDays || "30", 10) || 30)} day(s) ago
+              <button
+                type="button"
+                className={styles.filterChipRemove}
+                aria-label="Clear managerial filter"
+                onClick={clearManagerialShipmentFilter}
+              >
+                <X size={14} />
+              </button>
+            </span>
+          )}
+          {performanceStatusRaw && (
+            <span className={styles.filterChip}>
+              Shipment performance: {formatStatusLabel(performanceStatusRaw)}
+              <button
+                type="button"
+                className={styles.filterChipRemove}
+                aria-label="Clear performance status filter"
+                onClick={clearPerformanceStatusFilter}
+              >
+                <X size={14} />
+              </button>
+            </span>
+          )}
+          {performanceEtaLate && (
+            <span className={styles.filterChip}>
+              Late / delayed: overdue ETA, not delivered
+              <button
+                type="button"
+                className={styles.filterChipRemove}
+                aria-label="Clear late / delayed filter"
+                onClick={clearPerformanceEtaLateFilter}
+              >
+                <X size={14} />
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
       {error && <p className={styles.error}>{error}</p>}
       {loading ? (
         <LoadingSkeleton lines={6} />
@@ -595,31 +732,44 @@ export function ShipmentList() {
             <EmptyState
               title="No shipments found"
               description={
-                searchParam.trim() || poFromUrl || poToUrl || Object.keys(columnFilters).some((k) => columnFilters[k]?.length)
+                searchParam.trim() ||
+                poFromUrl ||
+                poToUrl ||
+                performanceStatusRaw ||
+                performanceEtaLate ||
+                Object.keys(columnFilters).some((k) => columnFilters[k]?.length)
                   ? "Try adjusting search, PO date, or column filters."
                   : "Create a shipment from a PO (Take ownership → Create shipment)."
               }
             />
           ) : (
             <>
-              <div className={styles.tableToolbar}>
+              <div className={styles.tableToolbar} data-tour="shipment-column-filters">
                 <button
                   type="button"
                   className={styles.filterClear}
                   onClick={() => {
                     setColumnFilters({});
                     setPage(1);
+                    if (performanceStatusRaw || performanceEtaLate) {
+                      const p = new URLSearchParams(searchParams.toString());
+                      p.delete(PERFORMANCE_STATUS_QUERY_PARAM);
+                      p.delete(PERFORMANCE_ETA_LATE_QUERY_PARAM);
+                      router.replace(`/dashboard/shipments${p.toString() ? `?${p.toString()}` : ""}`, { scroll: false });
+                    }
                   }}
                   disabled={Object.values(columnFilters).every((v) => !Array.isArray(v) || v.length === 0)}
                 >
                   Clear column filters
                 </button>
-                <TableColumnPicker
-                  columns={SHIPMENT_TABLE_COLUMNS}
-                  visibleById={visibleById}
-                  onToggle={toggleColumn}
-                  onReset={resetColumns}
-                />
+                <span data-tour="shipment-column-picker">
+                  <TableColumnPicker
+                    columns={SHIPMENT_TABLE_COLUMNS}
+                    visibleById={visibleById}
+                    onToggle={toggleColumn}
+                    onReset={resetColumns}
+                  />
+                </span>
               </div>
               <Table wrapperClassName={styles.tableFixedHeight} className={styles.shipmentTable}>
                 <TableHead>

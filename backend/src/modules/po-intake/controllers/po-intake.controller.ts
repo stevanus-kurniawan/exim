@@ -28,12 +28,24 @@ function parseListQuery(req: Request): ListPoIntakeQuery {
   const q = req.query as Record<string, unknown>;
   const page = q.page != null ? parseInt(String(q.page), 10) : undefined;
   const limit = q.limit != null ? parseInt(String(q.limit), 10) : undefined;
+  const detectedOlder = q.detected_older_than_days != null ? parseInt(String(q.detected_older_than_days), 10) : undefined;
+  const hasLinkedRaw = q.has_linked_shipment;
+  const has_linked_shipment =
+    hasLinkedRaw === "true" || hasLinkedRaw === "1"
+      ? true
+      : hasLinkedRaw === "false" || hasLinkedRaw === "0"
+        ? false
+        : undefined;
   return {
     page: Number.isNaN(page) ? undefined : page,
     limit: Number.isNaN(limit) ? undefined : limit,
     search: typeof q.search === "string" ? q.search : undefined,
     intake_status: typeof q.intake_status === "string" ? q.intake_status : undefined,
     po_number: typeof q.po_number === "string" ? q.po_number : undefined,
+    unclaimed_only: q.unclaimed_only === "true" || q.unclaimed_only === "1" ? true : undefined,
+    has_linked_shipment,
+    detected_older_than_days:
+      detectedOlder != null && !Number.isNaN(detectedOlder) && detectedOlder > 0 ? detectedOlder : undefined,
   };
 }
 

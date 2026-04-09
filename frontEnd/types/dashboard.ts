@@ -90,3 +90,12 @@ export interface StatusCountItem {
   status: string;
   count: number;
 }
+
+/** Adjustable threshold knobs for managerial insights tiles and alerts. */
+export interface ManagerialThresholds {
+  maxUnclaimedHours: number;
+  dormantRemainingQtyDays: number;
+  overdueCustomsDays: number;
+  highValueShipmentAmountUsd: number;
+  uncoupledValueWarningUsd: number;
+}

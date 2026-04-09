@@ -17,6 +17,9 @@ export interface LinkedPoLineReceived {
   item_id: string;
   received_qty: number;
   item_description: string | null;
+  bm_percentage: number | null;
+  ppn_percentage: number | null;
+  pph_percentage: number | null;
 }
 
 /** PO line row in shipment list expand panel. */
@@ -27,6 +30,9 @@ export interface ShipmentListPoLineItem {
   /** Quantity delivered on this shipment; null if not recorded. */
   delivery_qty: number | string | null;
   unit: string | null;
+  bm_percentage?: number | null;
+  ppn_percentage?: number | null;
+  pph_percentage?: number | null;
 }
 
 /** Linked PO with lines for shipment list. */
@@ -128,7 +134,6 @@ export interface ShipmentDetail {
   cbm: number | null;
   net_weight_mt: number | null;
   gross_weight_mt: number | null;
-  bm_percentage: number | null;
   kawasan_berikat: string | null;
   /** Yes / No */
   surveyor: string | null;
@@ -147,16 +152,13 @@ export interface ShipmentDetail {
   container_count_20_iso_tank: number | null;
   /** Total invoice in IDR: linked POs share currency & rate — IDR/RP = Σ(qty×price); else Σ(qty×price) × group rate. */
   total_items_amount: number;
-  /** BM = (bm_percentage / 100) × total_items_amount (system-calculated). */
+  /** BM total (IDR), user-entered on shipment. */
   bm: number;
-  /** Shipment PPN %; null uses `duty_percentage_defaults.ppn` in calculations. */
-  ppn_percentage: number | null;
-  pph_percentage: number | null;
-  /** Env defaults when row PPN/PPH % are null. */
-  duty_percentage_defaults: { ppn: number; pph: number };
+  /** PPN total (IDR), user-entered on shipment. */
   ppn: number;
+  /** PPH total (IDR), user-entered on shipment. */
   pph: number;
-  /** PDRI = BM + PPN + PPH */
+  /** PDRI = BM + PPN + PPH (system sum). */
   pdri: number;
   linked_pos: LinkedPoSummary[];
 }
@@ -229,6 +231,14 @@ export interface ListShipmentsQuery {
   eta_dates?: string[];
   origin_port_names?: string[];
   destination_port_names?: string[];
+  /** Managerial deep-link: remaining PO line qty & shipment not updated recently. */
+  dormant_remaining_qty?: boolean;
+  dormant_days?: number;
+  /**
+   * Shipment performance “late / delayed”: not delivered, ETA set, ETA date before today (UTC).
+   * Query param: `performance_eta_late=true`.
+   */
+  performance_eta_late?: boolean;
 }
 
 /** Full-database distinct values for shipment list column filters. */

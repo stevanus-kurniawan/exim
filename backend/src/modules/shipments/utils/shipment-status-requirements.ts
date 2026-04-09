@@ -65,7 +65,7 @@ export const STATUS_FIELD_LABELS: Record<string, string> = {
   has_bidding_participant: "At least one Forwarder Bidding participant",
   has_received_this_shipment: "Delivered Qty on group PO lines",
   has_currency_rate: "Currency rate on group PO",
-  bm_percentage: "BM rate (%)",
+  line_duty_percentages: "BM%, PPN%, and PPH% on each delivered line item",
   closed_at: "Delivered at",
   incoterm_amount: "Freight charges",
   product_classification: "Product classification type",
@@ -137,7 +137,7 @@ const STATUS_REQUIREMENTS: Record<string, StatusRequirement> = {
   },
   CUSTOMS_CLEARANCE: {
     status: "CUSTOMS_CLEARANCE",
-    requiredFields: ["ata", "nopen", "nopen_date", "has_currency_rate", "bm_percentage"],
+    requiredFields: ["ata", "nopen", "nopen_date", "has_currency_rate", "line_duty_percentages"],
     requiredDocs: STATUS_REQUIRED_DOCS.CUSTOMS_CLEARANCE,
   },
   DELIVERED: {
@@ -185,7 +185,7 @@ function addRequiredFieldsForLifecycleStatus(
     if (f === "has_bidding_participant") {
       if (!biddingStepApplies || statusKey !== "BIDDING_TRANSPORTER") continue;
     }
-    if (f === "bm_percentage" && skipBmForBc23) continue;
+    if (f === "line_duty_percentages" && skipBmForBc23) continue;
     if (
       (f === "forwarder_name" || f === "incoterm_amount" || f === "shipment_method") &&
       statusKey !== "TRANSPORT_CONFIRMED"
@@ -252,7 +252,6 @@ export interface ShipmentDetailForStatusValidation {
   atd?: string | null;
   ata?: string | null;
   depo?: boolean | null;
-  bm_percentage?: number | null;
   product_classification?: string | null;
   closed_at?: string | null;
   incoterm_amount?: number | null;
@@ -261,7 +260,12 @@ export interface ShipmentDetailForStatusValidation {
     intake_id: string;
     currency?: string | null;
     currency_rate?: number | null;
-    line_received?: Array<{ received_qty?: number }>;
+    line_received?: Array<{
+      received_qty?: number;
+      bm_percentage?: number | null;
+      ppn_percentage?: number | null;
+      pph_percentage?: number | null;
+    }>;
   }>;
 }
 
@@ -332,6 +336,30 @@ export function getMissingRequiredFields(
     if (key === "incoterm_amount") {
       const v = detail.incoterm_amount;
       if (v == null || !Number.isFinite(Number(v))) missing.push(key);
+      continue;
+    }
+    if (key === "line_duty_percentages") {
+      const linked = Array.isArray(detail.linked_pos) ? detail.linked_pos : [];
+      let incomplete = false;
+      outer: for (const po of linked) {
+        if (!po || typeof po !== "object") continue;
+        const lines = (po as { line_received?: unknown[] }).line_received;
+        if (!Array.isArray(lines)) continue;
+        for (const line of lines) {
+          if (!line || typeof line !== "object") continue;
+          const qty = Number((line as { received_qty?: unknown }).received_qty);
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+          const bm = (line as { bm_percentage?: unknown }).bm_percentage;
+          const ppn = (line as { ppn_percentage?: unknown }).ppn_percentage;
+          const pph = (line as { pph_percentage?: unknown }).pph_percentage;
+          const ok = (v: unknown) => v != null && Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 100;
+          if (!ok(bm) || !ok(ppn) || !ok(pph)) {
+            incomplete = true;
+            break outer;
+          }
+        }
+      }
+      if (incomplete) missing.push(key);
       continue;
     }
     const value = (detail as Record<string, unknown>)[key];

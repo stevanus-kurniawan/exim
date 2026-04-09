@@ -16,6 +16,8 @@ import { can } from "@/lib/permissions";
 import { isApiError } from "@/types/api";
 import type { ShipmentListItem } from "@/types/shipments";
 import type { ApiSuccess } from "@/types/api";
+import { DashboardCurrencyProvider } from "@/lib/dashboard-currency-context";
+import { DashboardUsdRateBar } from "@/components/dashboard/DashboardUsdRateBar";
 import { DashboardAnalyticsSection } from "./DashboardAnalyticsSection";
 import styles from "./DashboardContent.module.css";
 
@@ -78,13 +80,16 @@ export function DashboardContent() {
   const viewAllShipmentsHref = `/dashboard/shipments?po_from_date=${encodeURIComponent(viewAllPoFrom)}&po_to_date=${encodeURIComponent(viewAllPoTo)}`;
 
   return (
-    <section>
-      <PageHeader
-        title="Dashboard"
-        subtitle={user ? `Welcome, ${user.name} (${user.role})` : undefined}
-      />
+    <DashboardCurrencyProvider>
+      <section>
+        <PageHeader
+          title="Dashboard"
+          subtitle={user ? `Welcome, ${user.name} (${user.role})` : undefined}
+        />
 
-      <div className={styles.summaryGrid}>
+        {!can(user, VIEW_SHIPMENTS) && <DashboardUsdRateBar />}
+
+        <div className={styles.summaryGrid}>
         <StatsCard
           label="New Purchase Order detected"
           value={poCounts.newPoDetected}
@@ -135,7 +140,7 @@ export function DashboardContent() {
 
       {can(user, VIEW_SHIPMENTS) && <DashboardAnalyticsSection />}
 
-      <div className={styles.recentSection}>
+      <div className={styles.recentSection} data-tour="dashboard-recent-shipments">
         <div className={styles.recentHeader}>
           <h2 className={styles.recentTitle}>Recent shipments</h2>
           <Link href={viewAllShipmentsHref} className={styles.recentLink}>
@@ -183,7 +188,8 @@ export function DashboardContent() {
             </ul>
           </Card>
         )}
-      </div>
-    </section>
+        </div>
+      </section>
+    </DashboardCurrencyProvider>
   );
 }
