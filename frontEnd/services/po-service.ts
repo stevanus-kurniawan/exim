@@ -23,6 +23,10 @@ function buildQueryString(query: ListPoQuery): string {
   if (query.search) params.set("search", query.search);
   if (query.intake_status) params.set("intake_status", query.intake_status);
   if (query.po_number) params.set("po_number", query.po_number);
+  if (query.unclaimed_only) params.set("unclaimed_only", "true");
+  if (query.has_linked_shipment === true) params.set("has_linked_shipment", "true");
+  if (query.has_linked_shipment === false) params.set("has_linked_shipment", "false");
+  if (query.detected_older_than_days != null) params.set("detected_older_than_days", String(query.detected_older_than_days));
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

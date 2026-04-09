@@ -24,9 +24,11 @@ import { intakeStatusToBadgeVariant, formatStatusLabel } from "@/lib/status-badg
 import { formatPoStatusLabel } from "@/lib/po-status-label";
 import { isApiError } from "@/types/api";
 import { can } from "@/lib/permissions";
-import type { PoListItem } from "@/types/po";
+import { MANAGERIAL_LIST_FILTERS } from "@/lib/managerial-deep-link";
+import type { ListPoQuery, PoListItem } from "@/types/po";
 import type { ApiSuccess } from "@/types/api";
 import { RefreshIcon } from "@/components/icons/RefreshIcon";
+import { X } from "lucide-react";
 import styles from "./PoList.module.css";
 
 const DEFAULT_PAGE = 1;
@@ -70,6 +72,8 @@ export function PoList() {
   const searchParams = useSearchParams();
   const statusFromUrl = searchParams.get("intake_status") ?? undefined;
   const searchFromUrl = searchParams.get("search") ?? "";
+  const filterFromUrl = searchParams.get("filter");
+  const daysFromUrl = searchParams.get("days");
   const { accessToken, user } = useAuth();
   const { visibleById, toggleColumn, resetColumns, columns: poColumnDefs } = useTableColumnVisibility(
     PO_LIST_TABLE_COLUMNS_KEY,
@@ -85,21 +89,34 @@ export function PoList() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [openFilterColumnId, setOpenFilterColumnId] = useState<string | null>(null);
 
+  const listQuery = useMemo((): ListPoQuery => {
+    const base: ListPoQuery = {
+      page,
+      limit: DEFAULT_LIMIT,
+      search: searchParam.trim() || undefined,
+    };
+    if (filterFromUrl === MANAGERIAL_LIST_FILTERS.stale) {
+      const d = Math.max(1, parseInt(daysFromUrl || "2", 10) || 2);
+      return {
+        ...base,
+        intake_status: "NEW_PO_DETECTED",
+        unclaimed_only: true,
+        detected_older_than_days: d,
+      };
+    }
+    if (filterFromUrl === MANAGERIAL_LIST_FILTERS.uncoupled) {
+      return { ...base, has_linked_shipment: false };
+    }
+    return { ...base, intake_status: statusFromUrl };
+  }, [page, searchParam, filterFromUrl, daysFromUrl, statusFromUrl]);
+
   const fetchList = useCallback(() => {
     if (!accessToken) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    listPo(
-      {
-        page,
-        limit: DEFAULT_LIMIT,
-        search: searchParam.trim() || undefined,
-        intake_status: statusFromUrl,
-      },
-      accessToken
-    )
+    listPo(listQuery, accessToken)
       .then((res) => {
         if (isApiError(res)) {
           setError(res.message);
@@ -121,10 +138,18 @@ export function PoList() {
       })
       .catch(() => setError("Failed to load Purchase Order"))
       .finally(() => setLoading(false));
-  }, [accessToken, page, searchParam, statusFromUrl]);
+  }, [accessToken, listQuery]);
 
   useEffect(() => {
     fetchList();
+  }, [fetchList]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") fetchList();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, [fetchList]);
 
   useEffect(() => {
@@ -133,7 +158,23 @@ export function PoList() {
     setPage(1);
   }, [searchFromUrl]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [filterFromUrl, daysFromUrl, statusFromUrl]);
+
+  const clearManagerialFilter = useCallback(() => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("filter");
+    p.delete("days");
+    router.replace(`/dashboard/po${p.toString() ? `?${p.toString()}` : ""}`, { scroll: false });
+  }, [router, searchParams]);
+
   const totalPages = meta ? Math.ceil(meta.total / meta.limit) : 0;
+
+  const staleDaysChip =
+    filterFromUrl === MANAGERIAL_LIST_FILTERS.stale
+      ? Math.max(1, parseInt(daysFromUrl || "2", 10) || 2)
+      : 2;
 
   function handleRowClick(id: string) {
     router.push(`/dashboard/po/${id}`);
@@ -319,11 +360,32 @@ export function PoList() {
         <LoadingSkeleton lines={6} />
       ) : (
         <Card>
+          {(filterFromUrl === MANAGERIAL_LIST_FILTERS.stale || filterFromUrl === MANAGERIAL_LIST_FILTERS.uncoupled) && (
+            <div className={styles.filterChipsBar}>
+              <span className={styles.filterChip}>
+                {filterFromUrl === MANAGERIAL_LIST_FILTERS.stale ? (
+                  <>
+                    Stale POs: New PO detected, unclaimed, detected &gt; {staleDaysChip} day(s) ago
+                  </>
+                ) : (
+                  <>Uncoupled: no active shipment link</>
+                )}
+                <button
+                  type="button"
+                  className={styles.filterChipRemove}
+                  aria-label="Clear managerial filter"
+                  onClick={clearManagerialFilter}
+                >
+                  <X size={14} />
+                </button>
+              </span>
+            </div>
+          )}
           {items.length === 0 ? (
             <EmptyState
               title="No Purchase Order found"
               description={
-                searchParam.trim() || statusFromUrl
+                searchParam.trim() || statusFromUrl || filterFromUrl
                   ? "Try adjusting your search or filter."
                   : "New Purchase Orders from the external system will appear here."
               }

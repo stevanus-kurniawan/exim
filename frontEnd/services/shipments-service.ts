@@ -65,6 +65,9 @@ function buildQueryString(query: ListShipmentsQuery): string {
   appendMulti(params, "eta_date", query.eta_dates);
   appendMulti(params, "origin_port_name", query.origin_port_names);
   appendMulti(params, "destination_port_name", query.destination_port_names);
+  if (query.dormant_remaining_qty) params.set("dormant_remaining_qty", "true");
+  if (query.dormant_days != null) params.set("dormant_days", String(query.dormant_days));
+  if (query.performance_eta_late) params.set("performance_eta_late", "true");
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
@@ -112,9 +115,6 @@ export interface UpdateShipmentPayload {
   cbm?: number | null;
   net_weight_mt?: number;
   gross_weight_mt?: number;
-  bm_percentage?: number;
-  ppn_percentage?: number | null;
-  pph_percentage?: number | null;
   origin_port_name?: string;
   origin_port_country?: string;
   forwarder_name?: string;
@@ -137,6 +137,12 @@ export interface UpdateShipmentPayload {
   container_count_40ft?: number | null;
   package_count?: number | null;
   container_count_20_iso_tank?: number | null;
+  /** BM total (IDR), user-entered. */
+  bm?: number | null;
+  /** PPN total (IDR), user-entered. */
+  ppn_amount?: number | null;
+  /** PPH total (IDR), user-entered. */
+  pph_amount?: number | null;
 }
 
 export async function updateShipment(
@@ -309,6 +315,9 @@ export async function updateShipmentPoLines(
     received_qty: number;
     net_weight_mt: number | null;
     gross_weight_mt: number | null;
+    bm_percentage?: number | null;
+    ppn_percentage?: number | null;
+    pph_percentage?: number | null;
   }[],
   accessToken: string | null
 ): Promise<ApiResponse<ShipmentDetail>> {

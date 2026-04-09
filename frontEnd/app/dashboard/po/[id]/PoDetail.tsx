@@ -297,7 +297,11 @@ export function PoDetail({ id }: { id: string }) {
         title={detail.po_number}
         titleAddon={
           <>
-            <Badge variant={intakeStatusToBadgeVariant(detail.intake_status)} className={styles.headerStatusBadge}>
+            <Badge
+              variant={intakeStatusToBadgeVariant(detail.intake_status)}
+              className={styles.headerStatusBadge}
+              data-tour="po-status-badge"
+            >
               {formatPoStatusLabel(detail.intake_status)}
             </Badge>
             {st === "FULFILLED" && detail.overshipped && (
@@ -371,7 +375,7 @@ export function PoDetail({ id }: { id: string }) {
           )}
         </div>
 
-        <div className={styles.actions}>
+        <div className={styles.actions} data-tour="po-primary-actions">
           {can(user, "UPDATE_PO_INTAKE") && poEditLockedByShipment && (
             <p className={styles.editLockedNote}>{PO_EDIT_BLOCKED_BY_SHIPMENT_MESSAGE}</p>
           )}
@@ -422,7 +426,12 @@ export function PoDetail({ id }: { id: string }) {
                 <TableHeaderCell className={styles.thLeft}>#</TableHeaderCell>
                 <TableHeaderCell className={styles.thDesc}>Description</TableHeaderCell>
                 <TableHeaderCell className={styles.thRight}>Qty</TableHeaderCell>
-                <TableHeaderCell className={`${styles.thRight} ${styles.thRemaining}`}>Remaining qty</TableHeaderCell>
+                <TableHeaderCell
+                  className={`${styles.thRight} ${styles.thRemaining}`}
+                  data-tour="po-items-remaining-header"
+                >
+                  Remaining qty
+                </TableHeaderCell>
                 <TableHeaderCell className={styles.thLeft}>Unit</TableHeaderCell>
                 <TableHeaderCell className={styles.thRight}>
                   Price per unit{poCurrency ? ` (${poCurrency})` : ""}

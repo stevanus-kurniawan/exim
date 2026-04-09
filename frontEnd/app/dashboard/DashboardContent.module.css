@@ -352,6 +352,11 @@
   min-width: 820px;
 }
 
+.procurementTdNum {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .procurementGroupHead {
   text-align: center;
   font-size: var(--typography-fontSize-xs, 11px);
@@ -410,6 +415,10 @@
 .analyticsFilterPrimaryBtn:focus-visible {
   outline: 2px solid var(--color-primitive-border-dark, #9e9e9e);
   outline-offset: 2px;
+}
+
+.shipmentPerformanceSlot {
+  margin-bottom: var(--spacing-4, 24px);
 }
 
 .analyticsChipRow {
@@ -493,6 +502,114 @@
   display: grid;
   gap: var(--spacing-4, 24px);
   margin-bottom: var(--spacing-4, 24px);
+}
+
+.managerialGrid {
+  display: grid;
+  gap: var(--spacing-3, 16px);
+  margin-bottom: var(--spacing-4, 24px);
+}
+
+@media (min-width: 1100px) {
+  .managerialGrid {
+    grid-template-columns: 1.3fr 1fr 1.1fr;
+  }
+}
+
+.managerialCard {
+  border-radius: var(--borderRadius-lg, 12px) !important;
+  border: 1px solid #facc15 !important;
+  background: linear-gradient(180deg, #fffdf4 0%, #fffbeb 100%);
+}
+
+.managerialTitleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  margin-bottom: var(--spacing-2, 8px);
+}
+
+.alertTiles {
+  display: grid;
+  gap: var(--spacing-2, 8px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.alertTile {
+  margin: 0;
+  padding: 10px 12px;
+  text-align: left;
+  background: #fff8db;
+  border: 1px solid #fcd34d;
+  border-radius: var(--borderRadius-md, 8px);
+  cursor: pointer;
+}
+
+.alertTileDeepLink:hover {
+  background-color: #fffbeb;
+}
+
+.alertTileWarning.alertTileDeepLink:hover {
+  background-color: #fffbeb;
+}
+
+.alertTileWarning {
+  background: #fde68a;
+  border-color: #f59e0b;
+}
+
+.alertTileLabel {
+  margin: 0 0 4px;
+  font-size: var(--typography-fontSize-xs, 12px);
+  color: #78350f;
+}
+
+.alertTileValue {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: var(--typography-fontWeight-semibold, 600);
+  color: #451a03;
+}
+
+.alertTileValueMoney {
+  margin: 0;
+  font-weight: var(--typography-fontWeight-semibold, 600);
+  color: #451a03;
+}
+
+.productivityKpis {
+  display: grid;
+  gap: var(--spacing-2, 8px);
+  grid-template-columns: 1fr 1fr;
+}
+
+.bigNumber {
+  margin: 4px 0;
+  font-weight: var(--typography-fontWeight-semibold, 600);
+  color: #111827;
+}
+
+.highValueList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 170px;
+  overflow: auto;
+}
+
+.highValueRow {
+  margin: 0;
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+  border-radius: var(--borderRadius-sm, 6px);
+  background: var(--color-primitive-background-white, #fff);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: var(--typography-fontSize-xs, 12px);
 }
 
 @media (min-width: 1024px) {
@@ -692,10 +809,46 @@
   line-height: 1.5;
 }
 
+.customsLeadMini {
+  margin-top: var(--spacing-3, 16px);
+  padding-top: var(--spacing-3, 16px);
+  border-top: 1px solid var(--color-primitive-border-light, #e0e0e0);
+}
+
+.customsLeadList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.customsLeadList li {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(80px, 2fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--typography-fontSize-xs, 12px);
+}
+
+.customsLeadBarTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+
+.customsLeadBarFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+}
+
 .analyticsDrillBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: 10180;
   display: flex;
   align-items: flex-start;
   justify-content: center;

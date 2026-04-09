@@ -44,11 +44,6 @@ export interface CreateShipmentDto {
   coo?: string;
   incoterm_amount?: number;
   cbm?: number | null;
-  bm_percentage?: number;
-  /** PPN % of (total invoice + BM); omit/null uses env default. */
-  ppn_percentage?: number | null;
-  /** PPH % of (total invoice + BM); omit/null uses env default. */
-  pph_percentage?: number | null;
   kawasan_berikat?: string;
   product_classification?: string;
 }
@@ -75,9 +70,6 @@ export interface UpdateShipmentDto {
   cbm?: number | null;
   net_weight_mt?: number;
   gross_weight_mt?: number;
-  bm_percentage?: number;
-  ppn_percentage?: number | null;
-  pph_percentage?: number | null;
   origin_port_name?: string;
   origin_port_country?: string;
   forwarder_name?: string;
@@ -100,6 +92,12 @@ export interface UpdateShipmentDto {
   container_count_40ft?: number | null;
   package_count?: number | null;
   container_count_20_iso_tank?: number | null;
+  /** BM total (IDR), user-entered. */
+  bm?: number;
+  /** PPN total (IDR), user-entered. */
+  ppn_amount?: number;
+  /** PPH total (IDR), user-entered. */
+  pph_amount?: number;
 }
 
 export interface CloseShipmentDto {
@@ -172,6 +170,18 @@ export interface ListShipmentsQuery {
   origin_port_names?: string[];
   /** OR of trimmed `destination_port_name`. */
   destination_port_names?: string[];
+  /**
+   * Managerial deep-link: shipments with at least one linked PO line that still has global remaining qty,
+   * and shipment last update older than `dormant_days` (default 30).
+   */
+  dormant_remaining_qty?: boolean;
+  /** Used with `dormant_remaining_qty`; default 30. */
+  dormant_days?: number;
+  /**
+   * Shipment performance “late / delayed” drill-down: not delivered, ETA set, ETA calendar date before today (UTC).
+   * Aligns with `computeOnTimeStatus` → `kind === "late"` when ETA exists.
+   */
+  performance_eta_late?: boolean;
 }
 
 /** Distinct values for shipment list column filters (full database). */
@@ -203,6 +213,9 @@ export interface ShipmentListPoLineItem {
   /** Quantity delivered on this shipment for this line; null if not recorded. */
   delivery_qty: number | null;
   unit: string | null;
+  bm_percentage?: number | null;
+  ppn_percentage?: number | null;
+  pph_percentage?: number | null;
 }
 
 /** Linked PO block returned on shipment list (for multi-PO expand). */
@@ -261,9 +274,8 @@ export interface ShipmentRow {
   net_weight_mt: number | null;
   gross_weight_mt: number | null;
   bm: number | null;
-  bm_percentage: number | null;
-  ppn_percentage: number | null;
-  pph_percentage: number | null;
+  ppn_amount: number | null;
+  pph_amount: number | null;
   kawasan_berikat: string | null;
   surveyor: string | null;
   product_classification: string | null;
@@ -353,7 +365,6 @@ export interface ShipmentDetail {
   kawasan_berikat: string | null;
   surveyor: string | null;
   product_classification: string | null;
-  bm_percentage: number | null;
   unit_20ft: boolean;
   unit_40ft: boolean;
   unit_package: boolean;
@@ -364,19 +375,13 @@ export interface ShipmentDetail {
   container_count_20_iso_tank: number | null;
   /** Sum in IDR: all linked POs share currency & rate — IDR/RP = Σ(qty×price); else Σ(qty×price) × group currency_rate. */
   total_items_amount: number;
-  /** BM = (bm_percentage / 100) × total_items_amount (system-calculated). */
+  /** BM total (IDR), user-entered on shipment. */
   bm: number;
-  /** Shipment-specific PPN %; null means `duty_percentage_defaults.ppn` is used in formulas. */
-  ppn_percentage: number | null;
-  /** Shipment-specific PPH %; null means `duty_percentage_defaults.pph` is used in formulas. */
-  pph_percentage: number | null;
-  /** Env-based defaults when row PPN/PPH % are null (read-only). */
-  duty_percentage_defaults: { ppn: number; pph: number };
-  /** PPN = (effective PPN %) / 100 × (total_items_amount + BM). */
+  /** PPN total (IDR), user-entered on shipment. */
   ppn: number;
-  /** PPH = (effective PPH %) / 100 × (total_items_amount + BM). */
+  /** PPH total (IDR), user-entered on shipment. */
   pph: number;
-  /** PDRI = BM + PPN + PPH */
+  /** PDRI = BM + PPN + PPH (system sum). */
   pdri: number;
   linked_pos: LinkedPoSummary[];
 }
@@ -386,6 +391,10 @@ export interface LinkedPoLineReceived {
   received_qty: number;
   /** Snapshot from PO line at last write to shipment_po_line_received. */
   item_description: string | null;
+  /** User-entered % for this line (0–100); null if unset. */
+  bm_percentage: number | null;
+  ppn_percentage: number | null;
+  pph_percentage: number | null;
 }
 
 export interface LinkedPoSummary {

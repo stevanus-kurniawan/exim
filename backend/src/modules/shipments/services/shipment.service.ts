@@ -32,7 +32,6 @@ function isPoCurrencyIdr(currency: string | null | undefined): boolean {
   return c === "IDR" || c === "RP";
 }
 import { AppError } from "../../../middlewares/errorHandler.js";
-import { PPH_PERCENTAGE, PPN_PERCENTAGE } from "../../../config/tax-rates.js";
 import type {
   CreateShipmentDto,
   ShipmentCsvImportErrorRow,
@@ -221,9 +220,6 @@ function combinedRowToCreateDto(sf: UpdateShipmentDto): CreateShipmentDto {
     coo: sf.coo,
     incoterm_amount: sf.incoterm_amount,
     cbm: sf.cbm,
-    bm_percentage: sf.bm_percentage,
-    ppn_percentage: sf.ppn_percentage,
-    pph_percentage: sf.pph_percentage,
     product_classification: sf.product_classification ?? undefined,
   };
 }
@@ -304,7 +300,14 @@ function toLinkedSummary(
     coupled_at: Date;
     coupled_by: string;
   },
-  lineReceived: { item_id: string; received_qty: number; item_description?: string | null }[] = []
+  lineReceived: {
+    item_id: string;
+    received_qty: number;
+    item_description?: string | null;
+    bm_percentage?: number | null;
+    ppn_percentage?: number | null;
+    pph_percentage?: number | null;
+  }[] = []
 ): LinkedPoSummary {
   return {
     intake_id: row.intake_id,
@@ -323,40 +326,20 @@ function toLinkedSummary(
       item_id: l.item_id,
       received_qty: l.received_qty,
       item_description: l.item_description ?? null,
+      bm_percentage: l.bm_percentage ?? null,
+      ppn_percentage: l.ppn_percentage ?? null,
+      pph_percentage: l.pph_percentage ?? null,
     })),
   };
 }
 
-/** BM / PPN / PPH from shipment %; PPN/PPH fall back to env when row is null. */
-function computeBmPpnPphPdri(
-  bmPercentage: number | null | undefined,
+function toDetail(
+  row: ShipmentRow,
+  linkedPos: LinkedPoSummary[],
   totalItemsAmount: number,
-  pibType: string | null | undefined,
-  ppnPctRow: number | null | undefined,
-  pphPctRow: number | null | undefined
-): { bm: number; ppn: number; pph: number; pdri: number } {
-  if (isPibTypeBc23(pibType)) {
-    return { bm: 0, ppn: 0, pph: 0, pdri: 0 };
-  }
-  const bmPct = bmPercentage ?? 0;
-  const bmAmount = totalItemsAmount * (bmPct / 100);
-  const base = totalItemsAmount + bmAmount;
-  const ppnRate = ppnPctRow ?? PPN_PERCENTAGE;
-  const pphRate = pphPctRow ?? PPH_PERCENTAGE;
-  const ppn = base * (ppnRate / 100);
-  const pph = base * (pphRate / 100);
-  const pdri = bmAmount + ppn + pph;
-  return { bm: bmAmount, ppn, pph, pdri };
-}
-
-function toDetail(row: ShipmentRow, linkedPos: LinkedPoSummary[], totalItemsAmount: number): ShipmentDetail {
-  const { bm: bmAmount, ppn, pph, pdri } = computeBmPpnPphPdri(
-    row.bm_percentage,
-    totalItemsAmount,
-    row.pib_type,
-    row.ppn_percentage,
-    row.pph_percentage
-  );
+  duty: { bm: number; ppn: number; pph: number; pdri: number }
+): ShipmentDetail {
+  const { bm: bmAmount, ppn, pph, pdri } = duty;
   const pic = linkedPos.find((p) => p.taken_by_name && p.taken_by_name.trim() !== "")?.taken_by_name ?? null;
 
   return {
@@ -403,10 +386,6 @@ function toDetail(row: ShipmentRow, linkedPos: LinkedPoSummary[], totalItemsAmou
     net_weight_mt: row.net_weight_mt ?? null,
     gross_weight_mt: row.gross_weight_mt ?? null,
     bm: bmAmount,
-    bm_percentage: row.bm_percentage ?? null,
-    ppn_percentage: row.ppn_percentage ?? null,
-    pph_percentage: row.pph_percentage ?? null,
-    duty_percentage_defaults: { ppn: PPN_PERCENTAGE, pph: PPH_PERCENTAGE },
     kawasan_berikat: row.kawasan_berikat ?? null,
     surveyor: row.surveyor ?? null,
     product_classification: normalizeProductClassificationForApi(row.product_classification),
@@ -477,23 +456,29 @@ export class ShipmentService {
     return sumInPoCurrency * (groupRate ?? 1);
   }
 
-  /** Persist computed BM = (bm_percentage / 100) × sum(linked PO line amounts). */
+  /**
+   * BM/PPN/PPH totals are user-entered on shipment; PDRI = BM + PPN + PPH.
+   * BC 2.3 → all duty values are treated as zero.
+   */
+  private async computeDutyAmounts(
+    pibType: string | null | undefined,
+    storedBmAmount: number,
+    storedPpnAmount: number,
+    storedPphAmount: number
+  ): Promise<{ bm: number; ppn: number; pph: number; pdri: number }> {
+    const bm = Number.isFinite(storedBmAmount) ? storedBmAmount : 0;
+    const ppn = Number.isFinite(storedPpnAmount) ? storedPpnAmount : 0;
+    const pph = Number.isFinite(storedPphAmount) ? storedPphAmount : 0;
+    if (isPibTypeBc23(pibType)) {
+      return { bm: 0, ppn: 0, pph: 0, pdri: 0 };
+    }
+    const pdri = bm + ppn + pph;
+    return { bm, ppn, pph, pdri };
+  }
+
+  /** BM is now user-entered; keep legacy calls as no-op. */
   private async syncComputedBmToDb(shipmentId: string): Promise<void> {
-    const row = await this.repo.findById(shipmentId);
-    if (!row) return;
-    const linked = await this.mappingRepo.findActiveByShipmentId(shipmentId);
-    const total = await this.getShipmentTotalPoAmountIdr(
-      shipmentId,
-      linked.map((l) => ({ intake_id: l.intake_id, currency_rate: l.currency_rate, currency: l.currency }))
-    );
-    const { bm: computedBm } = computeBmPpnPphPdri(
-      row.bm_percentage,
-      total,
-      row.pib_type,
-      row.ppn_percentage,
-      row.pph_percentage
-    );
-    await this.repo.updateComputedBm(shipmentId, computedBm);
+    void shipmentId;
   }
 
   /**
@@ -573,6 +558,9 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
         pt?: string;
         plant?: string;
         shipment_fields: UpdateShipmentDto;
+        bm_percentage?: number | null;
+        ppn_percentage?: number | null;
+        pph_percentage?: number | null;
       }>
     >();
 
@@ -715,9 +703,6 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
         incoterm_amount,
         net_weight_mt,
         gross_weight_mt,
-        bm_percentage,
-        ppn_percentage,
-        pph_percentage,
         closed_at: delivered_at,
         remarks,
       };
@@ -735,6 +720,9 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
         pt: (cells[idx("pt")] ?? "").trim() || undefined,
         plant: (cells[idx("plant")] ?? "").trim() || undefined,
         shipment_fields: dto,
+        bm_percentage: bm_percentage ?? null,
+        ppn_percentage: ppn_percentage ?? null,
+        pph_percentage: pph_percentage ?? null,
       });
       byShipment.set(shipmentNo, arr);
     }
@@ -775,7 +763,20 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
         await this.update(shipmentId, first.shipment_fields);
       }
 
-      const byIntake = new Map<string, Array<{ row: number; po_number: string; item_id: string; received_qty: number; invoice_no?: string; currency_rate?: number }>>();
+      const byIntake = new Map<
+        string,
+        Array<{
+          row: number;
+          po_number: string;
+          item_id: string;
+          received_qty: number;
+          invoice_no?: string;
+          currency_rate?: number;
+          bm_percentage?: number | null;
+          ppn_percentage?: number | null;
+          pph_percentage?: number | null;
+        }>
+      >();
       let hasGroupError = false;
       for (const r of rows) {
         const intakeId = await poIntakeRepo.findIdByPoNumberTrimmed(r.po_number);
@@ -837,7 +838,17 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           continue;
         }
         const a = byIntake.get(intakeId) ?? [];
-        a.push({ row: r.row, po_number: r.po_number, item_id: item.id, received_qty: r.received_qty, invoice_no: r.invoice_no, currency_rate: r.currency_rate });
+        a.push({
+          row: r.row,
+          po_number: r.po_number,
+          item_id: item.id,
+          received_qty: r.received_qty,
+          invoice_no: r.invoice_no,
+          currency_rate: r.currency_rate,
+          bm_percentage: r.bm_percentage ?? null,
+          ppn_percentage: r.ppn_percentage ?? null,
+          pph_percentage: r.pph_percentage ?? null,
+        });
         byIntake.set(intakeId, a);
       }
       if (hasGroupError) continue;
@@ -858,7 +869,13 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           await this.updatePoLines(
             shipmentId,
             intakeId,
-            list.map((x) => ({ item_id: x.item_id, received_qty: x.received_qty }))
+            list.map((x) => ({
+              item_id: x.item_id,
+              received_qty: x.received_qty,
+              bm_percentage: x.bm_percentage ?? null,
+              ppn_percentage: x.ppn_percentage ?? null,
+              pph_percentage: x.pph_percentage ?? null,
+            }))
           );
         }
         importedShipments += 1;
@@ -907,7 +924,16 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
       id,
       linked.map((l) => ({ intake_id: l.intake_id, currency_rate: l.currency_rate, currency: l.currency }))
     );
-    return toDetail(row, linkedPos, totalItemsAmount);
+    const bmAmt = row.bm != null ? Number(row.bm) : 0;
+    const ppnAmt = row.ppn_amount != null ? Number(row.ppn_amount) : 0;
+    const pphAmt = row.pph_amount != null ? Number(row.pph_amount) : 0;
+    const duty = await this.computeDutyAmounts(
+      row.pib_type,
+      bmAmt,
+      ppnAmt,
+      pphAmt
+    );
+    return toDetail(row, linkedPos, totalItemsAmount, duty);
   }
 
   async update(id: string, dto: UpdateShipmentDto, changedBy?: string): Promise<ShipmentDetail | null> {
@@ -949,18 +975,7 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
       });
     }
     await this.syncComputedBmToDb(id);
-    const linked = await this.mappingRepo.findActiveByShipmentId(id);
-    const linkedPos = await Promise.all(
-      linked.map(async (l) => {
-        const lines = this.lineReceivedRepo ? await this.lineReceivedRepo.findByShipmentAndIntake(id, l.intake_id) : [];
-        return toLinkedSummary(l, lines);
-      })
-    );
-    const totalItemsAmount = await this.getShipmentTotalPoAmountIdr(
-      id,
-      linked.map((l) => ({ intake_id: l.intake_id, currency_rate: l.currency_rate, currency: l.currency }))
-    );
-    return toDetail(row, linkedPos, totalItemsAmount);
+    return this.getById(id);
   }
 
   async close(id: string, reason: string | null): Promise<void> {
@@ -1101,6 +1116,9 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
     lines: {
       item_id: string;
       received_qty: number;
+      bm_percentage?: number | null;
+      ppn_percentage?: number | null;
+      pph_percentage?: number | null;
     }[]
   ): Promise<ShipmentDetail | null> {
     if (!this.lineReceivedRepo) throw new AppError("Line received repository not available", 500);
@@ -1135,16 +1153,20 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
     await this.lineReceivedRepo.setLines(
       shipmentId,
       intakeId,
-      lines.map(({ item_id, received_qty }) => ({
-        item_id,
-        received_qty,
-        item_description: itemDescriptionById.get(item_id) ?? null,
+      lines.map((line) => ({
+        item_id: line.item_id,
+        received_qty: line.received_qty,
+        item_description: itemDescriptionById.get(line.item_id) ?? null,
+        bm_percentage: line.bm_percentage ?? null,
+        ppn_percentage: line.ppn_percentage ?? null,
+        pph_percentage: line.pph_percentage ?? null,
       }))
     );
     for (const line of lines) {
       await poIntakeRepo.recomputeTotalAmountItemByLine(intakeId, line.item_id);
     }
     await syncPoIntakeStatus(intakeId);
+    await this.syncComputedBmToDb(shipmentId);
     return this.getById(shipmentId);
   }
 }

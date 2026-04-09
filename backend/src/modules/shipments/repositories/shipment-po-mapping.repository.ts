@@ -122,7 +122,10 @@ export class ShipmentPoMappingRepository {
               'item_description', it.item_description,
               'qty_po', it.qty,
               'delivery_qty', r.received_qty,
-              'unit', it.unit
+              'unit', it.unit,
+              'bm_percentage', r.bm_percentage,
+              'ppn_percentage', r.ppn_percentage,
+              'pph_percentage', r.pph_percentage
             ) ORDER BY it.line_number
           )
           FROM Import_purchase_order_items it

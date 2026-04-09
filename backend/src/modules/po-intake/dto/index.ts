@@ -67,6 +67,15 @@ export interface ListPoIntakeQuery {
   search?: string;
   intake_status?: string;
   po_number?: string;
+  /** When true, only rows where `taken_by_user_id` is null (unclaimed). */
+  unclaimed_only?: boolean;
+  /** Filter by presence of an active (non-decoupled) shipment mapping. */
+  has_linked_shipment?: boolean;
+  /**
+   * PO “detected” time uses `created_at`. When set (e.g. 2), only rows where
+   * `created_at` is older than N full days from now (managerial stale POs).
+   */
+  detected_older_than_days?: number;
 }
 
 export interface PoIntakeRow {

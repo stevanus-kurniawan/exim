@@ -28,6 +28,12 @@ export interface ListPoQuery {
   search?: string;
   intake_status?: string;
   po_number?: string;
+  /** Matches backend GET /po — unclaimed POs only. */
+  unclaimed_only?: boolean;
+  /** `false`: no active shipment_po_mapping; `true`: at least one active mapping. */
+  has_linked_shipment?: boolean;
+  /** Stale “detected” filter: `created_at` older than N full days. */
+  detected_older_than_days?: number;
 }
 
 export interface ListPoMeta {

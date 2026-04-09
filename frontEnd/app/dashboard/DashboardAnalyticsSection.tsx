@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronRight, Filter, Plane, Ship, Truck, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { can } from "@/lib/permissions";
 import { PT_OPTION_LABELS, getAllPlantsSorted } from "@/lib/po-create-constants";
 import { PRODUCT_CLASSIFICATION_OPTIONS, displayProductClassification } from "@/lib/product-classification";
 import { getShipmentAnalytics, getShipmentAnalyticsLines } from "@/services/dashboard-service";
+import { listPo, getPoDetail } from "@/services/po-service";
+import { listShipments, getShipmentDetail, getShipmentTimeline } from "@/services/shipments-service";
 import { Card } from "@/components/cards";
 import { LoadingSkeleton } from "@/components/feedback";
 import { EmptyState } from "@/components/navigation";
@@ -25,14 +28,60 @@ import type {
   ShipmentAnalyticsQuery,
   ShipmentAnalyticsSummary,
 } from "@/types/analytics";
+import type { PoListItem, PoDetail } from "@/types/po";
+import type { ShipmentDetail, ShipmentListItem } from "@/types/shipments";
+import type { ManagerialThresholds } from "@/types/dashboard";
 import {
   LogisticsDetailTable,
   type LogisticsNavigateSync,
   type TransportTab,
 } from "@/components/logistics-detail-table";
+import { OrderFulfillmentVariance } from "@/components/order-fulfillment-variance/OrderFulfillmentVariance";
+import { ShipmentPerformanceCard } from "@/components/shipment-performance/ShipmentPerformanceCard";
+import { ScalingFinancialValue } from "@/components/dashboard/ScalingFinancialValue";
+import { DashboardUsdRateBar } from "@/components/dashboard/DashboardUsdRateBar";
+import {
+  amountToDashboardUsd,
+  idrToDashboardUsd,
+  useDashboardCurrency,
+} from "@/lib/dashboard-currency-context";
+import {
+  buildPoListDeepLink,
+  buildShipmentListDormantDeepLink,
+  DEFAULT_STALE_DAYS,
+  managerialFilterTooltip,
+  MANAGERIAL_LIST_FILTERS,
+} from "@/lib/managerial-deep-link";
 import styles from "./DashboardContent.module.css";
 
 const VIEW_SHIPMENTS = "VIEW_SHIPMENTS";
+const MAX_MANAGERIAL_PAGE_SCAN = 8;
+const PO_PAGE_LIMIT = 100;
+const SHIPMENT_PAGE_LIMIT = 50;
+
+const MANAGERIAL_THRESHOLDS: ManagerialThresholds = {
+  maxUnclaimedHours: 48,
+  dormantRemainingQtyDays: 30,
+  overdueCustomsDays: 7,
+  highValueShipmentAmountUsd: 50000,
+  uncoupledValueWarningUsd: 100000,
+};
+
+type ManagerialInsights = {
+  stalePoNumbers: string[];
+  uncoupledVolumeUsd: number;
+  uncoupledPoCount: number;
+  dormantPoNumbers: string[];
+  /** Count for shipment-list deep link (remaining qty + stale shipment update). */
+  dormantShipmentCount: number;
+  airPct: number;
+  seaPct: number;
+  airTrendDeltaPct: number;
+  customsLeadByPlant: Array<{ plant: string; days: number }>;
+  overdueCustomsCount: number;
+  highValueShipments: Array<{ id: string; shipmentNo: string; amountUsd: number; status: string }>;
+  totalImportValueUsdMonth: number;
+};
 
 function formatYmd(d: Date): string {
   const y = d.getFullYear();
@@ -75,12 +124,6 @@ function buildAnalyticsQueryPayload(a: AppliedFilters): ShipmentAnalyticsQuery {
   };
 }
 
-const idrCurrency = new Intl.NumberFormat("id-ID", {
-  style: "currency",
-  currency: "IDR",
-  maximumFractionDigits: 0,
-});
-
 function formatQtyDelivered(n: number): string {
   if (!Number.isFinite(n)) return "—";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(n);
@@ -97,8 +140,10 @@ function formatShipByLabel(mode: string): string {
 }
 
 export function DashboardAnalyticsSection() {
+  const router = useRouter();
   const { user, accessToken } = useAuth();
   const allowed = can(user, VIEW_SHIPMENTS);
+  const { idrPerUsd, formatUsd } = useDashboardCurrency();
 
   const initial = useMemo(() => defaultRange(), []);
   const emptyFilters = useMemo(
@@ -125,6 +170,8 @@ export function DashboardAnalyticsSection() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [logisticsNavigate, setLogisticsNavigate] = useState<LogisticsNavigateSync>({ token: 0, tab: "AIR" });
   const [logisticsModalOpen, setLogisticsModalOpen] = useState(false);
+  const [managerialLoading, setManagerialLoading] = useState(false);
+  const [managerial, setManagerial] = useState<ManagerialInsights | null>(null);
 
   const goLogisticsDetail = useCallback((tab: TransportTab) => {
     setDrill(null);
@@ -133,6 +180,238 @@ export function DashboardAnalyticsSection() {
   }, []);
 
   const plantsSorted = useMemo(() => getAllPlantsSorted(), []);
+
+  const getPoAmountDashboardUsd = (detail: PoDetail, rate: number): number =>
+    detail.items.reduce((sum, item) => {
+      const qty = Number(item.qty ?? 0);
+      const value = Number(item.value ?? 0);
+      if (!Number.isFinite(qty) || !Number.isFinite(value)) return sum;
+      const lineNative = qty * value;
+      return sum + amountToDashboardUsd(lineNative, detail.currency, rate);
+    }, 0);
+
+  const getRemainingQty = (detail: PoDetail): number =>
+    detail.items.reduce((sum, item) => sum + Math.max(0, Number(item.remaining_qty ?? 0)), 0);
+
+  const getLastPoShipmentTouch = (detail: PoDetail): number => {
+    const timestamps: number[] = [Date.parse(detail.updated_at), Date.parse(detail.created_at)];
+    for (const linked of detail.linked_shipments) {
+      [linked.coupled_at, linked.atd, linked.ata, linked.delivered_at].forEach((ts) => {
+        if (ts) timestamps.push(Date.parse(ts));
+      });
+    }
+    return Math.max(...timestamps.filter((n) => Number.isFinite(n)));
+  };
+
+  const loadManagerialInsights = useCallback(async () => {
+    if (!accessToken || !allowed) return;
+    setManagerialLoading(true);
+    try {
+      const now = Date.now();
+      const scanPo = async (intakeStatus: string): Promise<PoListItem[]> => {
+        const rows: PoListItem[] = [];
+        for (let page = 1; page <= MAX_MANAGERIAL_PAGE_SCAN; page += 1) {
+          const res = await listPo({ page, limit: PO_PAGE_LIMIT, intake_status: intakeStatus }, accessToken);
+          if (isApiError(res) || !res.success) break;
+          const chunk = (res as ApiSuccess<PoListItem[]>).data ?? [];
+          rows.push(...chunk);
+          if (chunk.length < PO_PAGE_LIMIT) break;
+        }
+        return rows;
+      };
+
+      const [newPos, claimedPos] = await Promise.all([scanPo("NEW_PO_DETECTED"), scanPo("CLAIMED")]);
+      const stalePoNumbers = newPos
+        .filter((po) => {
+          const ageHours = (now - Date.parse(po.created_at)) / (1000 * 60 * 60);
+          return ageHours >= MANAGERIAL_THRESHOLDS.maxUnclaimedHours && !po.taken_by_user_id;
+        })
+        .map((po) => po.po_number);
+
+      const candidatePoIds = Array.from(new Set([...newPos, ...claimedPos].map((po) => po.id)));
+      const poDetails: PoDetail[] = [];
+      for (let i = 0; i < candidatePoIds.length; i += 10) {
+        const chunk = candidatePoIds.slice(i, i + 10);
+        const detailChunk = await Promise.all(chunk.map((id) => getPoDetail(id, accessToken)));
+        for (const d of detailChunk) {
+          if (!isApiError(d) && d.success && d.data) poDetails.push(d.data);
+        }
+      }
+
+      /**
+       * Uncoupled must match GET /po?has_linked_shipment=false (active shipment_po_mapping with decoupled_at IS NULL).
+       * Do not infer from “linked_shipments” on a NEW+CLAIMED-only scan — that double-counts logic and can drift from the list view.
+       */
+      let uncoupledPoCount = 0;
+      let uncoupledVolumeUsd = 0;
+      const uncoupledListRows: PoListItem[] = [];
+      for (let page = 1; page <= MAX_MANAGERIAL_PAGE_SCAN; page += 1) {
+        const res = await listPo({ page, limit: PO_PAGE_LIMIT, has_linked_shipment: false }, accessToken);
+        if (isApiError(res) || !res.success) break;
+        if (page === 1) uncoupledPoCount = Number((res as ApiSuccess<PoListItem[]>).meta?.total ?? 0);
+        const chunk = (res as ApiSuccess<PoListItem[]>).data ?? [];
+        uncoupledListRows.push(...chunk);
+        if (chunk.length < PO_PAGE_LIMIT) break;
+      }
+      const uncoupledIds = [...new Set(uncoupledListRows.map((r) => r.id))];
+      for (let i = 0; i < uncoupledIds.length; i += 10) {
+        const chunk = uncoupledIds.slice(i, i + 10);
+        const detailChunk = await Promise.all(chunk.map((id) => getPoDetail(id, accessToken)));
+        for (const d of detailChunk) {
+          if (isApiError(d) || !d.success || !d.data) continue;
+          const detail = d.data;
+          if ((detail.linked_shipments ?? []).length > 0) continue;
+          uncoupledVolumeUsd += getPoAmountDashboardUsd(detail, idrPerUsd);
+        }
+      }
+
+      const dormantPoNumbers: string[] = [];
+      for (const detail of poDetails) {
+        if (getRemainingQty(detail) > 0) {
+          const dormantDays = (now - getLastPoShipmentTouch(detail)) / (1000 * 60 * 60 * 24);
+          if (dormantDays >= MANAGERIAL_THRESHOLDS.dormantRemainingQtyDays) dormantPoNumbers.push(detail.po_number);
+        }
+      }
+
+      const weekWindow = (daysAgoStart: number, daysAgoEnd: number) => {
+        const to = new Date();
+        to.setDate(to.getDate() - daysAgoEnd);
+        const from = new Date();
+        from.setDate(from.getDate() - daysAgoStart);
+        return { from: formatYmd(from), to: formatYmd(to) };
+      };
+
+      const thisWeek = weekWindow(7, 0);
+      const prevWeek = weekWindow(14, 7);
+      const [airThis, seaThis, airPrev] = await Promise.all([
+        listShipments({ page: 1, limit: 1, shipment_method: "AIR", created_from: thisWeek.from, created_to: thisWeek.to }, accessToken),
+        listShipments({ page: 1, limit: 1, shipment_method: "SEA", created_from: thisWeek.from, created_to: thisWeek.to }, accessToken),
+        listShipments({ page: 1, limit: 1, shipment_method: "AIR", created_from: prevWeek.from, created_to: prevWeek.to }, accessToken),
+      ]);
+
+      const airThisCount = !isApiError(airThis) ? Number(airThis.meta?.total ?? 0) : 0;
+      const seaThisCount = !isApiError(seaThis) ? Number(seaThis.meta?.total ?? 0) : 0;
+      const airPrevCount = !isApiError(airPrev) ? Number(airPrev.meta?.total ?? 0) : 0;
+      const thisTotal = Math.max(1, airThisCount + seaThisCount);
+      const airTrendDeltaPct = airPrevCount > 0 ? ((airThisCount - airPrevCount) / airPrevCount) * 100 : 0;
+
+      const customsRows: string[] = [];
+      for (let page = 1; page <= 2; page += 1) {
+        const customsRes = await listShipments(
+          { page, limit: SHIPMENT_PAGE_LIMIT, status: "CUSTOMS_CLEARANCE" },
+          accessToken
+        );
+        if (isApiError(customsRes) || !customsRes.success) break;
+        const ids = ((customsRes as ApiSuccess<ShipmentListItem[]>).data ?? []).map((s) => s.id);
+        customsRows.push(...ids);
+        if (ids.length < SHIPMENT_PAGE_LIMIT) break;
+      }
+
+      const plantDurations = new Map<string, number[]>();
+      let overdueCustomsCount = 0;
+      for (let i = 0; i < customsRows.length; i += 6) {
+        const chunk = customsRows.slice(i, i + 6);
+        const customsDetails = await Promise.all(chunk.map((id) => getShipmentDetail(id, accessToken)));
+        const customsTimelines = await Promise.all(chunk.map((id) => getShipmentTimeline(id, accessToken)));
+        chunk.forEach((_, idx) => {
+          const detailRes = customsDetails[idx];
+          const timelineRes = customsTimelines[idx];
+          if (isApiError(detailRes) || !detailRes.success || !detailRes.data) return;
+          if (isApiError(timelineRes) || !timelineRes.success || !timelineRes.data) return;
+          const customsTouch = timelineRes.data
+            .filter((t) => t.status === "CUSTOMS_CLEARANCE")
+            .map((t) => Date.parse(t.changed_at))
+            .filter((n) => Number.isFinite(n))
+            .sort((a, b) => b - a)[0];
+          if (!Number.isFinite(customsTouch)) return;
+          const days = (now - customsTouch) / (1000 * 60 * 60 * 24);
+          const plant = detailRes.data.linked_pos.find((p) => p.plant)?.plant ?? "Unknown";
+          const prev = plantDurations.get(plant) ?? [];
+          prev.push(days);
+          plantDurations.set(plant, prev);
+          if (days >= MANAGERIAL_THRESHOLDS.overdueCustomsDays) overdueCustomsCount += 1;
+        });
+      }
+
+      const customsLeadByPlant = [...plantDurations.entries()]
+        .map(([plant, vals]) => ({ plant, days: vals.reduce((a, b) => a + b, 0) / vals.length }))
+        .sort((a, b) => b.days - a.days)
+        .slice(0, 5);
+
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      const monthFrom = formatYmd(monthStart);
+      const monthTo = formatYmd(new Date());
+      const monthShipmentIds: string[] = [];
+      for (let page = 1; page <= 5; page += 1) {
+        const list = await listShipments(
+          {
+            page,
+            limit: SHIPMENT_PAGE_LIMIT,
+            statuses: ["ON_SHIPMENT", "DELIVERED"],
+            created_from: monthFrom,
+            created_to: monthTo,
+          },
+          accessToken
+        );
+        if (isApiError(list) || !list.success) break;
+        const ids = ((list as ApiSuccess<ShipmentListItem[]>).data ?? []).map((s) => s.id);
+        monthShipmentIds.push(...ids);
+        if (ids.length < SHIPMENT_PAGE_LIMIT) break;
+      }
+
+      const highValueShipments: Array<{ id: string; shipmentNo: string; amountUsd: number; status: string }> = [];
+      let totalImportValueUsdMonth = 0;
+      for (let i = 0; i < monthShipmentIds.length; i += 8) {
+        const detailChunk = await Promise.all(monthShipmentIds.slice(i, i + 8).map((id) => getShipmentDetail(id, accessToken)));
+        for (const detailRes of detailChunk) {
+          if (isApiError(detailRes) || !detailRes.success || !detailRes.data) continue;
+          const amountIdr = Number(detailRes.data.total_items_amount ?? 0);
+          const amountUsd = idrToDashboardUsd(amountIdr, idrPerUsd);
+          totalImportValueUsdMonth += amountUsd;
+          if (amountUsd >= MANAGERIAL_THRESHOLDS.highValueShipmentAmountUsd) {
+            highValueShipments.push({
+              id: detailRes.data.id,
+              shipmentNo: detailRes.data.shipment_number,
+              amountUsd,
+              status: detailRes.data.current_status,
+            });
+          }
+        }
+      }
+
+      const dormantShipListRes = await listShipments(
+        {
+          page: 1,
+          limit: 1,
+          dormant_remaining_qty: true,
+          dormant_days: MANAGERIAL_THRESHOLDS.dormantRemainingQtyDays,
+        },
+        accessToken
+      );
+      const dormantShipmentCount =
+        !isApiError(dormantShipListRes) && dormantShipListRes.success
+          ? Number(dormantShipListRes.meta?.total ?? 0)
+          : 0;
+
+      setManagerial({
+        stalePoNumbers,
+        uncoupledVolumeUsd,
+        uncoupledPoCount,
+        dormantPoNumbers,
+        dormantShipmentCount,
+        airPct: (airThisCount / thisTotal) * 100,
+        seaPct: (seaThisCount / thisTotal) * 100,
+        airTrendDeltaPct,
+        customsLeadByPlant,
+        overdueCustomsCount,
+        highValueShipments: highValueShipments.sort((a, b) => b.amountUsd - a.amountUsd).slice(0, 8),
+        totalImportValueUsdMonth,
+      });
+    } finally {
+      setManagerialLoading(false);
+    }
+  }, [accessToken, allowed, idrPerUsd]);
 
   const loadSummary = useCallback(async () => {
     if (!accessToken || !allowed) return;
@@ -152,6 +431,10 @@ export function DashboardAnalyticsSection() {
   useEffect(() => {
     loadSummary();
   }, [loadSummary]);
+
+  useEffect(() => {
+    loadManagerialInsights();
+  }, [loadManagerialInsights]);
 
   useEffect(() => {
     if (!drill || !accessToken || !allowed) {
@@ -261,6 +544,8 @@ export function DashboardAnalyticsSection() {
     }));
   }, [summary?.sea_logistics]);
 
+  const managerialThresholds = MANAGERIAL_THRESHOLDS;
+
   useEffect(() => {
     if (drill) setLogisticsModalOpen(false);
   }, [drill]);
@@ -299,11 +584,13 @@ export function DashboardAnalyticsSection() {
   if (!allowed) return null;
 
   return (
-    <div className={styles.managementSection}>
+    <div className={styles.managementSection} data-tour="dashboard-analytics">
       <div className={styles.analyticsViewport}>
         <div className={styles.managementHeader}>
           <h2 className={styles.managementTitle}>Shipment analytics</h2>
         </div>
+
+        <DashboardUsdRateBar embedded />
 
         <div className={styles.analyticsTopBar}>
           <button
@@ -419,12 +706,96 @@ export function DashboardAnalyticsSection() {
           ) : null}
         </div>
 
+        <div className={styles.shipmentPerformanceSlot}>
+          <ShipmentPerformanceCard />
+        </div>
+
         {error && <p className={styles.specError}>{error}</p>}
 
       {loading && !summary ? (
         <LoadingSkeleton lines={8} />
       ) : (
         <>
+          <div className={styles.managerialGrid}>
+            <Card className={styles.managerialCard}>
+              <div className={styles.managerialTitleRow}>
+                <h3 className={styles.analyticsCardTitle}>Exception & alert summary</h3>
+                {managerialLoading && <span className={styles.analyticsTrendHint}>Updating…</span>}
+              </div>
+              <div className={styles.alertTiles}>
+                <button
+                  type="button"
+                  className={`${styles.alertTile} ${styles.alertTileDeepLink}`}
+                  title={managerialFilterTooltip(managerial?.stalePoNumbers.length ?? 0)}
+                  onClick={() =>
+                    router.push(buildPoListDeepLink(MANAGERIAL_LIST_FILTERS.stale, DEFAULT_STALE_DAYS))
+                  }
+                >
+                  <p className={styles.alertTileLabel}>Stale POs ({managerialThresholds.maxUnclaimedHours}h+ unclaimed)</p>
+                  <p className={styles.alertTileValue}>{managerial?.stalePoNumbers.length ?? 0}</p>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.alertTile} ${styles.alertTileDeepLink} ${
+                    (managerial?.uncoupledVolumeUsd ?? 0) >= managerialThresholds.uncoupledValueWarningUsd
+                      ? styles.alertTileWarning
+                      : ""
+                  }`}
+                  title={managerialFilterTooltip(managerial?.uncoupledPoCount ?? 0)}
+                  onClick={() => router.push(buildPoListDeepLink(MANAGERIAL_LIST_FILTERS.uncoupled))}
+                >
+                  <p className={styles.alertTileLabel}>Uncoupled volume</p>
+                  <ScalingFinancialValue
+                    className={styles.alertTileValueMoney}
+                    valueText={formatUsd(managerial?.uncoupledVolumeUsd ?? 0)}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.alertTile} ${styles.alertTileDeepLink}`}
+                  title={managerialFilterTooltip(managerial?.dormantShipmentCount ?? 0)}
+                  onClick={() =>
+                    router.push(
+                      buildShipmentListDormantDeepLink(managerialThresholds.dormantRemainingQtyDays)
+                    )
+                  }
+                >
+                  <p className={styles.alertTileLabel}>Dormant remaining qty ({managerialThresholds.dormantRemainingQtyDays}d+)</p>
+                  <p className={styles.alertTileValue}>{managerial?.dormantShipmentCount ?? 0}</p>
+                </button>
+                <button
+                  type="button"
+                  className={styles.alertTile}
+                  onClick={() => router.push("/dashboard/shipments?status=CUSTOMS_CLEARANCE")}
+                >
+                  <p className={styles.alertTileLabel}>Overdue customs shipments ({managerialThresholds.overdueCustomsDays}d+)</p>
+                  <p className={styles.alertTileValue}>{managerial?.overdueCustomsCount ?? 0}</p>
+                </button>
+              </div>
+            </Card>
+            <OrderFulfillmentVariance accessToken={accessToken} allowed={allowed} />
+            <Card className={styles.managerialCard}>
+              <h3 className={styles.analyticsCardTitle}>Financial visibility</h3>
+              <ScalingFinancialValue
+                className={styles.bigNumber}
+                valueText={formatUsd(managerial?.totalImportValueUsdMonth ?? 0)}
+              />
+              <p className={styles.subsectionHint}>Total import value this month (On shipment + Delivered)</p>
+              <div className={styles.highValueList}>
+                {(managerial?.highValueShipments ?? []).map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    className={styles.highValueRow}
+                    onClick={() => router.push(`/dashboard/shipments/${s.id}`)}
+                  >
+                    <span>{s.shipmentNo}</span>
+                    <span>{formatUsd(s.amountUsd)}</span>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          </div>
           <div className={styles.analyticsGrid}>
             <Card
               className={styles.analyticsInteractiveCard}
@@ -558,14 +929,14 @@ export function DashboardAnalyticsSection() {
                 </h3>
                 <p
                   className={styles.analyticsTrendHint}
-                  title="Year-over-year comparison is not available yet."
+                  title="Week-over-week air share movement."
                 >
-                  YoY vs last year · n/a
+                  Air trend · {managerial ? `${managerial.airTrendDeltaPct >= 0 ? "+" : ""}${managerial.airTrendDeltaPct.toFixed(1)}%` : "n/a"}
                 </p>
               </div>
               <div className={styles.analyticsCardTop} style={{ marginTop: 0 }}>
                 <span className={styles.analyticsKpiSuffixLarge} style={{ paddingBottom: 0 }}>
-                  {summary?.total_shipments ?? 0} shipments in view
+                  Air {managerial ? `${managerial.airPct.toFixed(0)}%` : "—"} · Sea {managerial ? `${managerial.seaPct.toFixed(0)}%` : "—"}
                 </span>
                 <button
                   type="button"
@@ -672,6 +1043,20 @@ export function DashboardAnalyticsSection() {
                   </p>
                 </div>
               )}
+              <div className={styles.customsLeadMini}>
+                <p className={styles.seaLoadLabel}>Customs clearance avg days by plant</p>
+                <ul className={styles.customsLeadList}>
+                  {(managerial?.customsLeadByPlant ?? []).map((row) => (
+                    <li key={row.plant}>
+                      <span>{row.plant}</span>
+                      <div className={styles.customsLeadBarTrack}>
+                        <div className={styles.customsLeadBarFill} style={{ width: `${Math.min(100, row.days * 10)}%` }} />
+                      </div>
+                      <strong>{row.days.toFixed(1)}d</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </Card>
           </div>
 
@@ -764,7 +1149,7 @@ export function DashboardAnalyticsSection() {
                         <TableHeaderCell>Plant</TableHeaderCell>
                         <TableHeaderCell>Unit</TableHeaderCell>
                         <TableHeaderCell>Total qty delivered</TableHeaderCell>
-                        <TableHeaderCell>Total price (IDR)</TableHeaderCell>
+                        <TableHeaderCell>Total price (USD)</TableHeaderCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -777,7 +1162,9 @@ export function DashboardAnalyticsSection() {
                           <TableCell>{row.plant ?? "—"}</TableCell>
                           <TableCell>{row.unit?.trim() ? row.unit.trim() : "—"}</TableCell>
                           <TableCell>{formatQtyDelivered(row.total_qty_delivered)}</TableCell>
-                          <TableCell>{idrCurrency.format(row.total_price_idr)}</TableCell>
+                          <TableCell className={styles.procurementTdNum}>
+                            {formatUsd(idrToDashboardUsd(row.total_price_idr, idrPerUsd))}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
