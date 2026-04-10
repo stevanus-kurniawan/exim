@@ -7,6 +7,11 @@ export interface StorageUploadOptions {
   versionId: string;
   fileName: string;
   mimeType?: string;
+  /**
+   * When set, storage key is `{directoryPrefix}/{versionId}_{fileName}` (relative to base path).
+   * When omitted, legacy `{documentId}/{versionId}_{fileName}`.
+   */
+  directoryPrefix?: string;
 }
 
 export interface StorageUploadResult {

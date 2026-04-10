@@ -6,9 +6,11 @@ import { v4 as uuidv4 } from "uuid";
 import { AppError } from "../../../middlewares/errorHandler.js";
 import { LocalStorageAdapter } from "../../../shared/storage/local-storage.adapter.js";
 import { shipmentDocumentRequiresIntakeId } from "../constants/shipment-document-types.js";
+import { PoIntakeRepository } from "../../po-intake/repositories/po-intake.repository.js";
 import { ShipmentRepository } from "../repositories/shipment.repository.js";
 import { ShipmentDocumentRepository } from "../repositories/shipment-document.repository.js";
 import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping.repository.js";
+import { buildShipmentDocumentDirectoryPrefix } from "../utils/shipment-document-storage-path.js";
 
 function safeFileName(name: string): string {
   const n = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
@@ -63,7 +65,8 @@ export class ShipmentDocumentService {
   constructor(
     private readonly shipmentRepo: ShipmentRepository,
     private readonly docRepo: ShipmentDocumentRepository,
-    private readonly mappingRepo: ShipmentPoMappingRepository
+    private readonly mappingRepo: ShipmentPoMappingRepository,
+    private readonly poIntakeRepo: PoIntakeRepository
   ) {}
 
   async list(shipmentId: string): Promise<ShipmentDocumentListItem[]> {
@@ -102,6 +105,13 @@ export class ShipmentDocumentService {
       resolvedIntakeId = null;
     }
 
+    const intakeRow =
+      resolvedIntakeId != null ? await this.poIntakeRepo.findById(resolvedIntakeId) : null;
+    if (resolvedIntakeId && !intakeRow) {
+      throw new AppError("Linked purchase order intake not found", 404);
+    }
+    const directoryPrefix = buildShipmentDocumentDirectoryPrefix(shipment, intakeRow);
+
     const id = uuidv4();
     const fileName = safeFileName(originalName || "file");
     const { storageKey } = await this.storage.upload(fileBuffer, {
@@ -109,6 +119,7 @@ export class ShipmentDocumentService {
       versionId: id,
       fileName,
       mimeType,
+      directoryPrefix,
     });
 
     const row = await this.docRepo.insert({

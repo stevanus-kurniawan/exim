@@ -9,11 +9,13 @@ import { ShipmentDocumentService } from "../services/shipment-document.service.j
 import { ShipmentRepository } from "../repositories/shipment.repository.js";
 import { ShipmentDocumentRepository } from "../repositories/shipment-document.repository.js";
 import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping.repository.js";
+import { PoIntakeRepository } from "../../po-intake/repositories/po-intake.repository.js";
 
 const shipmentRepo = new ShipmentRepository();
 const docRepo = new ShipmentDocumentRepository();
 const mappingRepo = new ShipmentPoMappingRepository();
-const service = new ShipmentDocumentService(shipmentRepo, docRepo, mappingRepo);
+const poIntakeRepo = new PoIntakeRepository();
+const service = new ShipmentDocumentService(shipmentRepo, docRepo, mappingRepo, poIntakeRepo);
 
 type MulterFile = { buffer: Buffer; originalname: string; mimetype?: string };
 
