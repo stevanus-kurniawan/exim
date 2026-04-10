@@ -8,8 +8,8 @@ export interface StorageUploadOptions {
   fileName: string;
   mimeType?: string;
   /**
-   * When set, storage key is `{directoryPrefix}/{versionId}_{fileName}` (relative to base path).
-   * When omitted, legacy `{documentId}/{versionId}_{fileName}`.
+   * When set, storage key is `{directoryPrefix}/{fileName}_{versionId}` (relative to base path).
+   * When omitted, `{documentId}/{fileName}_{versionId}`.
    */
   directoryPrefix?: string;
 }

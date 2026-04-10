@@ -8,6 +8,7 @@ const PIB_TYPE_CANONICAL: Record<string, string> = {
   "BC 23": "BC 2.3",
   "BC 20": "BC 2.0",
   "Consignee Note": "Consignment Note",
+  "Consignment Note": "Consignment Note",
 };
 
 export function displayPibTypeLabel(stored: string | null | undefined): string {
