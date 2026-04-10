@@ -8,8 +8,9 @@ export interface StorageUploadOptions {
   fileName: string;
   mimeType?: string;
   /**
-   * When set, storage key is `{directoryPrefix}/{fileName}_{versionId}` (relative to base path).
-   * When omitted, `{documentId}/{fileName}_{versionId}`.
+   * When set, storage key is `{directoryPrefix}/{leaf}` where leaf is `{stem}_{versionId}{ext}`
+   * when `fileName` has an extension (keeps `.pdf` etc. as the real extension).
+   * When omitted, `{documentId}/{leaf}`.
    */
   directoryPrefix?: string;
 }

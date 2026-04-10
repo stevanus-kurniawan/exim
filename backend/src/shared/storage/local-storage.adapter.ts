@@ -24,13 +24,38 @@ function storageKeyToPath(storageKey: string): string {
   return join(getBasePath(), storageKey.replace(/\.\./g, ""));
 }
 
-/** UUID v4 at end: `name_uuid` (current). */
-const UUID_SUFFIX = /_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-/** UUID v4 at start: `uuid_name` (legacy uploads). */
-const UUID_PREFIX = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_/i;
+const UUID =
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+/** `stem_uuid.ext` — keeps a real extension (e.g. .pdf) for OS / DSM type detection. */
+const UUID_BEFORE_EXT = new RegExp(`_(${UUID})(\\.[^./\\\\]+)$`, "i");
+/** `name_uuid` with no extension. */
+const UUID_SUFFIX = new RegExp(`_(${UUID})$`, "i");
+/** `uuid_name` (legacy uploads). */
+const UUID_PREFIX = new RegExp(`^(${UUID})_`, "i");
+/** Accidental `file.pdf_uuid` from older naming — recover `file.pdf` for display. */
+const BROKEN_EXT_UUID = new RegExp(`^(.+)\\.([^./\\\\]+)_(${UUID})$`, "i");
+
+/**
+ * Stored leaf name: put version id before the last extension so `.pdf` stays the real extension.
+ */
+export function buildStorageLeafFileName(safeFileName: string, versionId: string): string {
+  const lastDot = safeFileName.lastIndexOf(".");
+  if (lastDot <= 0 || lastDot >= safeFileName.length - 1) {
+    return `${safeFileName}_${versionId}`;
+  }
+  const stem = safeFileName.slice(0, lastDot);
+  const ext = safeFileName.slice(lastDot);
+  return `${stem}_${versionId}${ext}`;
+}
 
 /** Leaf file part of storage key → user-facing base name (strips document id). */
 export function parseStoredLeafBaseName(leaf: string): string {
+  const beforeExt = leaf.match(UUID_BEFORE_EXT);
+  if (beforeExt && beforeExt.index !== undefined) {
+    return leaf.slice(0, beforeExt.index) + beforeExt[2];
+  }
+  const broken = leaf.match(BROKEN_EXT_UUID);
+  if (broken) return `${broken[1]}.${broken[2]}`;
   const tail = leaf.match(UUID_SUFFIX);
   if (tail) return leaf.slice(0, leaf.length - tail[0].length);
   const head = leaf.match(UUID_PREFIX);
@@ -44,7 +69,7 @@ export class LocalStorageAdapter implements IStorageService {
       throw new Error(`File size exceeds ${MAX_FILE_SIZE_BYTES / 1024 / 1024} MB limit`);
     }
     const base = getBasePath();
-    const leaf = `${options.fileName}_${options.versionId}`;
+    const leaf = buildStorageLeafFileName(options.fileName, options.versionId);
     const storageKey = options.directoryPrefix
       ? `${options.directoryPrefix.replace(/\.\./g, "")}/${leaf}`
       : `${options.documentId}/${leaf}`;
