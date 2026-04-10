@@ -30,7 +30,9 @@ export class LocalStorageAdapter implements IStorageService {
       throw new Error(`File size exceeds ${MAX_FILE_SIZE_BYTES / 1024 / 1024} MB limit`);
     }
     const base = getBasePath();
-    const storageKey = `${options.documentId}/${options.versionId}_${options.fileName}`;
+    const storageKey = options.directoryPrefix
+      ? `${options.directoryPrefix.replace(/\.\./g, "")}/${options.versionId}_${options.fileName}`
+      : `${options.documentId}/${options.versionId}_${options.fileName}`;
     const fullPath = join(base, storageKey);
     const dir = join(fullPath, "..");
     if (!existsSync(dir)) {

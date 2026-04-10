@@ -19,3 +19,15 @@ export function isPibTypeBc23(stored: string | null | undefined): boolean {
   const canonical = PIB_TYPE_CANONICAL[v] ?? v;
   return canonical === "BC 2.3";
 }
+
+/**
+ * Folder name under Year/PT/Plant for customs filing (BC 2.0 vs BC 2.3).
+ * Unknown non-empty values are sanitized; empty → Unknown_PIB.
+ */
+export function pibTypeStorageFolderName(stored: string | null | undefined): string {
+  const v = stored != null ? String(stored).trim() : "";
+  if (!v) return "Unknown_PIB";
+  const canonical = PIB_TYPE_CANONICAL[v] ?? v;
+  if (canonical === "BC 2.0" || canonical === "BC 2.3") return canonical;
+  return canonical.replace(/[/\\:*?"<>|\s]+/g, "_").replace(/_+/g, "_").slice(0, 80) || "Other_PIB";
+}
