@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useId } from "react";
+import { useEffect, useState, useCallback, useMemo, useId, type DragEvent } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
@@ -84,6 +84,15 @@ import type { PoDetail, PoItemSummary } from "@/types/po";
 import { config } from "@/lib/config";
 import { getCountryOptions } from "@/lib/countries";
 import { getVisibleShipmentDocumentSlots } from "@/lib/shipment-document-slots";
+import {
+  canUploadPO,
+  isPOUploaded,
+  getShipmentDocumentUploadBlockReason,
+  getShipmentDocUploadButtonTitle,
+  documentRestrictionToastMessage,
+  type DocumentUploadBlockReason,
+} from "@/lib/shipment-document-prerequisites";
+import { Lock } from "lucide-react";
 import { parseYesNoSelectValue, formatYesNoOrLegacy } from "@/lib/yes-no-field";
 import { can } from "@/lib/permissions";
 import {
@@ -535,10 +544,15 @@ function ShipmentDocUploadControl({
   disabled,
   isUploading,
   onFile,
+  labelTitle,
+  buttonLabel = "Upload",
 }: {
   disabled: boolean;
   isUploading: boolean;
   onFile: (file: File) => void;
+  /** Shown on hover when disabled (native tooltip). */
+  labelTitle?: string;
+  buttonLabel?: string;
 }) {
   const inputId = useId();
   return (
@@ -558,12 +572,52 @@ function ShipmentDocUploadControl({
       />
       <label
         htmlFor={inputId}
+        title={labelTitle}
         className={[styles.shipmentDocUploadBtn, disabled ? styles.shipmentDocUploadBtnDisabled : ""].filter(Boolean).join(" ")}
         aria-disabled={disabled}
       >
-        {isUploading ? "Uploading…" : "Upload"}
+        {isUploading ? "Uploading…" : buttonLabel}
       </label>
     </span>
+  );
+}
+
+function ShipmentDocDropZone({
+  className,
+  blockReason,
+  canAct,
+  onToastRestricted,
+  onFile,
+  children,
+}: {
+  className?: string;
+  blockReason: DocumentUploadBlockReason | null;
+  canAct: boolean;
+  onToastRestricted: (reason: DocumentUploadBlockReason) => void;
+  onFile: (file: File) => void;
+  children: React.ReactNode;
+}) {
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canAct || blockReason) e.dataTransfer.dropEffect = "none";
+    else e.dataTransfer.dropEffect = "copy";
+  };
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canAct) return;
+    if (blockReason) {
+      onToastRestricted(blockReason);
+      return;
+    }
+    const f = e.dataTransfer.files?.[0];
+    if (f) onFile(f);
+  };
+  return (
+    <div className={className} onDragOver={onDragOver} onDrop={onDrop}>
+      {children}
+    </div>
   );
 }
 
@@ -1207,18 +1261,33 @@ export function ShipmentDetail({ id }: { id: string }) {
     file: File | null,
     intakeId?: string | null
   ) {
-    if (!accessToken || !id || !file) return;
+    if (!accessToken || !id || !file || !detail) return;
+    const block = getShipmentDocumentUploadBlockReason({
+      shipment: detail,
+      documentType,
+      documents: shipmentDocuments,
+      shipmentStatusDelivered: shipmentDocumentsLockedByDeliveredStatus,
+    });
+    if (block) {
+      pushToast(documentRestrictionToastMessage(block), "error");
+      return;
+    }
     const key = shipmentDocSlotKey(documentType, status, intakeId);
     setActionError(null);
     setUploadingDocSlotKey(key);
     uploadShipmentDocument(id, file, documentType, status, accessToken, intakeId ?? undefined)
-      .then((res) => {
+      .then(async (res) => {
         if (isApiError(res)) {
           setActionError(res.message);
           pushToast(res.message, "error");
           return;
         }
-        if (res.data) setShipmentDocuments((prev) => [res.data!, ...prev]);
+        const listRes = await listShipmentDocuments(id, accessToken);
+        if (!isApiError(listRes) && Array.isArray(listRes.data)) {
+          setShipmentDocuments(listRes.data);
+        } else if (res.data) {
+          setShipmentDocuments((prev) => [res.data!, ...prev]);
+        }
         pushToast("Document uploaded.", "success");
       })
       .catch((err) => {
@@ -3255,6 +3324,10 @@ export function ShipmentDetail({ id }: { id: string }) {
             ) : (
               <span className={styles.fieldValue}>{displayPibTypeLabel(detail.pib_type)}</span>
             )}
+            <span className={styles.fieldHint} role="note">
+              Required for document upload
+              {isUpdatingShipment ? " — save shipment after selecting PIB type." : "."}
+            </span>
           </div>
           <div className={statusFieldClass("no_request_pib")} data-status-field="no_request_pib">
             <span className={styles.fieldLabel}>PIB Doc No</span>
@@ -4091,101 +4164,173 @@ export function ShipmentDetail({ id }: { id: string }) {
                   .filter(Boolean)
                   .join(" ")}
               >
-              <h3 className={styles.shipmentDocCategoryTitle}>{slot.label}</h3>
-              {slot.per_linked_po ? (
-                <>
-                  <p className={styles.shipmentDocPerPoHint}>
-                    Upload one or more files for each PO in this shipment group. PO number identifies the intake in the list below.
-                  </p>
-                  {!detail?.linked_pos?.length ? (
-                    <p className={styles.shipmentDocFileEmpty}>
-                      No PO in this group yet — add a purchase order to this shipment to upload {slot.label} documents per PO.
+              {(() => {
+                const blockReason = getShipmentDocumentUploadBlockReason({
+                  shipment: detail,
+                  documentType: slot.document_type,
+                  documents: shipmentDocuments,
+                  shipmentStatusDelivered: shipmentDocumentsLockedByDeliveredStatus,
+                });
+                const uploadTitle = getShipmentDocUploadButtonTitle(slot.document_type, blockReason);
+                const showSlotLock = blockReason !== null;
+                const subShell = (locked: boolean) =>
+                  [styles.shipmentDocSub, locked ? styles.shipmentDocSubLocked : styles.shipmentDocSubUnlocked].join(" ");
+                const toastRestricted = (r: DocumentUploadBlockReason) =>
+                  pushToast(documentRestrictionToastMessage(r), "error");
+                const uploadBusy = (key: string) => uploadingDocSlotKey === key;
+                const uploadOff = (key: string) => blockReason !== null || uploadBusy(key);
+
+                const prereqHintPib =
+                  !shipmentDocumentsLockedByDeliveredStatus && !canUploadPO(detail) ? (
+                    <p className={styles.shipmentDocLockedHint} role="note">
+                      {slot.document_type === "PO"
+                        ? "Set and save PIB type in General Information before uploading PO documents."
+                        : "Set and save PIB type in General Information before uploading documents."}
                     </p>
-                  ) : (
-                    <div className={styles.shipmentDocPoGrid}>
-                      {detail.linked_pos.map((po) => {
-                        const slotKey = shipmentDocSlotKey(slot.document_type, null, po.intake_id);
-                        const files = filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null, {
-                          kind: "intake",
-                          intakeId: po.intake_id,
-                        });
-                        return (
-                          <div key={po.intake_id} className={styles.shipmentDocSub}>
-                            <div className={styles.shipmentDocSubHeader}>
-                              <span className={styles.shipmentDocStatusLabel}>PO {display(po.po_number)}</span>
-                              {canUploadDocument && (
-                                <ShipmentDocUploadControl
-                                  disabled={uploadingDocSlotKey === slotKey || shipmentDocumentsLockedByDeliveredStatus}
-                                  isUploading={uploadingDocSlotKey === slotKey}
+                  ) : null;
+                const prereqHintPo =
+                  !shipmentDocumentsLockedByDeliveredStatus &&
+                  canUploadPO(detail) &&
+                  !isPOUploaded(shipmentDocuments) &&
+                  slot.document_type !== "PO" ? (
+                    <p className={styles.shipmentDocLockedHint} role="note">
+                      Upload PO to unlock other documents.
+                    </p>
+                  ) : null;
+
+                return (
+                  <>
+                    <h3 className={styles.shipmentDocCategoryTitleRow}>
+                      {showSlotLock ? (
+                        <Lock className={styles.shipmentDocLockIcon} strokeWidth={2} aria-hidden />
+                      ) : null}
+                      <span className={styles.shipmentDocCategoryTitleText}>{slot.label}</span>
+                    </h3>
+                    {prereqHintPib}
+                    {prereqHintPo}
+                    {slot.per_linked_po ? (
+                      <>
+                        <p className={styles.shipmentDocPerPoHint}>
+                          Upload one or more files for each PO in this shipment group. PO number identifies the intake in
+                          the list below.
+                        </p>
+                        {!detail?.linked_pos?.length ? (
+                          <p className={styles.shipmentDocFileEmpty}>
+                            No PO in this group yet — add a purchase order to this shipment to upload {slot.label}{" "}
+                            documents per PO.
+                          </p>
+                        ) : (
+                          <div className={styles.shipmentDocPoGrid}>
+                            {detail.linked_pos.map((po) => {
+                              const slotKey = shipmentDocSlotKey(slot.document_type, null, po.intake_id);
+                              const files = filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null, {
+                                kind: "intake",
+                                intakeId: po.intake_id,
+                              });
+                              return (
+                                <ShipmentDocDropZone
+                                  key={po.intake_id}
+                                  className={subShell(blockReason !== null)}
+                                  blockReason={blockReason}
+                                  canAct={canUploadDocument}
+                                  onToastRestricted={toastRestricted}
                                   onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f, po.intake_id)}
-                                />
-                              )}
-                            </div>
-                            <ul className={styles.shipmentDocFileList}>{renderShipmentDocumentFileList(files)}</ul>
-                          </div>
-                        );
-                      })}
-                      {filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null, { kind: "shipment_level" }).length >
-                        0 && (
-                        <div className={styles.shipmentDocSub}>
-                          <div className={styles.shipmentDocSubHeader}>
-                            <span className={styles.shipmentDocStatusLabel}>Not tied to a PO</span>
-                            <span className={styles.shipmentDocLegacyNote}>Earlier uploads without PO scope</span>
-                          </div>
-                          <ul className={styles.shipmentDocFileList}>
-                            {renderShipmentDocumentFileList(
-                              filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null, { kind: "shipment_level" })
+                                >
+                                  <div className={styles.shipmentDocSubHeader}>
+                                    <span className={styles.shipmentDocStatusLabel}>PO {display(po.po_number)}</span>
+                                    {canUploadDocument && (
+                                      <ShipmentDocUploadControl
+                                        disabled={uploadOff(slotKey)}
+                                        isUploading={uploadBusy(slotKey)}
+                                        labelTitle={uploadTitle}
+                                        buttonLabel={slot.document_type === "PO" ? "Upload PO" : "Upload"}
+                                        onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f, po.intake_id)}
+                                      />
+                                    )}
+                                  </div>
+                                  <ul className={styles.shipmentDocFileList}>{renderShipmentDocumentFileList(files)}</ul>
+                                </ShipmentDocDropZone>
+                              );
+                            })}
+                            {filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null, {
+                              kind: "shipment_level",
+                            }).length > 0 && (
+                              <div className={styles.shipmentDocSub}>
+                                <div className={styles.shipmentDocSubHeader}>
+                                  <span className={styles.shipmentDocStatusLabel}>Not tied to a PO</span>
+                                  <span className={styles.shipmentDocLegacyNote}>Earlier uploads without PO scope</span>
+                                </div>
+                                <ul className={styles.shipmentDocFileList}>
+                                  {renderShipmentDocumentFileList(
+                                    filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null, {
+                                      kind: "shipment_level",
+                                    })
+                                  )}
+                                </ul>
+                              </div>
                             )}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : slot.statuses ? (
-                <div className={styles.shipmentDocStatusGrid}>
-                  {slot.statuses.map((st) => {
-                    const slotKey = shipmentDocSlotKey(slot.document_type, st);
-                    const files = filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, st);
-                    return (
-                      <div key={st} className={styles.shipmentDocSub}>
+                          </div>
+                        )}
+                      </>
+                    ) : slot.statuses ? (
+                      <div className={styles.shipmentDocStatusGrid}>
+                        {slot.statuses.map((st) => {
+                          const slotKey = shipmentDocSlotKey(slot.document_type, st);
+                          const files = filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, st);
+                          return (
+                            <ShipmentDocDropZone
+                              key={st}
+                              className={subShell(blockReason !== null)}
+                              blockReason={blockReason}
+                              canAct={canUploadDocument}
+                              onToastRestricted={toastRestricted}
+                              onFile={(f) => handleShipmentDocumentUpload(slot.document_type, st, f)}
+                            >
+                              <div className={styles.shipmentDocSubHeader}>
+                                <span className={styles.shipmentDocStatusLabel}>{st === "DRAFT" ? "Draft" : "Final"}</span>
+                                {canUploadDocument && (
+                                  <ShipmentDocUploadControl
+                                    disabled={uploadOff(slotKey)}
+                                    isUploading={uploadBusy(slotKey)}
+                                    labelTitle={uploadTitle}
+                                    onFile={(f) => handleShipmentDocumentUpload(slot.document_type, st, f)}
+                                  />
+                                )}
+                              </div>
+                              <ul className={styles.shipmentDocFileList}>{renderShipmentDocumentFileList(files)}</ul>
+                            </ShipmentDocDropZone>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <ShipmentDocDropZone
+                        className={subShell(blockReason !== null)}
+                        blockReason={blockReason}
+                        canAct={canUploadDocument}
+                        onToastRestricted={toastRestricted}
+                        onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f)}
+                      >
                         <div className={styles.shipmentDocSubHeader}>
-                          <span className={styles.shipmentDocStatusLabel}>{st === "DRAFT" ? "Draft" : "Final"}</span>
+                          <span className={styles.shipmentDocStatusLabel}>Files</span>
                           {canUploadDocument && (
                             <ShipmentDocUploadControl
-                              disabled={uploadingDocSlotKey === slotKey || shipmentDocumentsLockedByDeliveredStatus}
-                              isUploading={uploadingDocSlotKey === slotKey}
-                              onFile={(f) => handleShipmentDocumentUpload(slot.document_type, st, f)}
+                              disabled={uploadOff(shipmentDocSlotKey(slot.document_type, null))}
+                              isUploading={uploadBusy(shipmentDocSlotKey(slot.document_type, null))}
+                              labelTitle={uploadTitle}
+                              onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f)}
                             />
                           )}
                         </div>
-                        <ul className={styles.shipmentDocFileList}>{renderShipmentDocumentFileList(files)}</ul>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className={styles.shipmentDocSub}>
-                  <div className={styles.shipmentDocSubHeader}>
-                    <span className={styles.shipmentDocStatusLabel}>Files</span>
-                    {canUploadDocument && (
-                      <ShipmentDocUploadControl
-                        disabled={
-                          uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null) ||
-                          shipmentDocumentsLockedByDeliveredStatus
-                        }
-                        isUploading={uploadingDocSlotKey === shipmentDocSlotKey(slot.document_type, null)}
-                        onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f)}
-                      />
+                        <ul className={styles.shipmentDocFileList}>
+                          {renderShipmentDocumentFileList(
+                            filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null)
+                          )}
+                        </ul>
+                      </ShipmentDocDropZone>
                     )}
-                  </div>
-                  <ul className={styles.shipmentDocFileList}>
-                    {renderShipmentDocumentFileList(
-                      filterShipmentDocumentsBySlot(shipmentDocuments, slot.document_type, null)
-                    )}
-                  </ul>
-                </div>
-              )}
+                  </>
+                );
+              })()}
               </div>
             );
           })}

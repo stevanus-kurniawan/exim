@@ -10,7 +10,10 @@ import { PoIntakeRepository } from "../../po-intake/repositories/po-intake.repos
 import { ShipmentRepository } from "../repositories/shipment.repository.js";
 import { ShipmentDocumentRepository } from "../repositories/shipment-document.repository.js";
 import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping.repository.js";
-import { buildShipmentDocumentDirectoryPrefix } from "../utils/shipment-document-storage-path.js";
+import {
+  buildFilingPathContext,
+  buildShipmentDocumentDirectoryPrefix,
+} from "../utils/shipment-document-storage-path.js";
 
 function safeFileName(name: string): string {
   const n = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
@@ -110,7 +113,12 @@ export class ShipmentDocumentService {
     if (resolvedIntakeId && !intakeRow) {
       throw new AppError("Linked purchase order intake not found", 404);
     }
-    const directoryPrefix = buildShipmentDocumentDirectoryPrefix(shipment, intakeRow);
+
+    // PO rows store intake_id; other types do not. Filing path uses all active linked POs
+    // (coupled_at ASC): same supplier → one folder with combined PO numbers.
+    const linked = await this.mappingRepo.findActiveByShipmentId(shipmentId);
+    const filingCtx = buildFilingPathContext(shipment, intakeRow, linked);
+    const directoryPrefix = buildShipmentDocumentDirectoryPrefix(shipment, filingCtx);
 
     const id = uuidv4();
     const fileName = safeFileName(originalName || "file");

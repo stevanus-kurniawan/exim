@@ -293,6 +293,7 @@
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--spacing-3, 16px);
   margin-bottom: var(--spacing-3, 16px);
+  min-width: 0;
 }
 
 .grid {
@@ -301,23 +302,41 @@
   gap: var(--spacing-4, 24px);
   /* Space before the next subsection border / content so fields don’t sit on the line */
   margin-bottom: var(--spacing-4, 24px);
+  min-width: 0;
+}
+
+/* Let grid items shrink so long values wrap instead of overlapping the next column */
+.grid > *,
+.editGrid > *,
+.poArrivalMappingGroup > *,
+.bidFormGrid > *,
+.bidCardGrid > *,
+.shipmentDocStatusGrid > * {
+  min-width: 0;
 }
 
 .field {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-1, 4px);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .fieldLabel {
   font-size: var(--typography-fontSize-small, 14px);
   font-weight: var(--typography-fontWeight-medium, 500);
   color: var(--color-primitive-text-steel, #6b6b6b);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .fieldValue {
   font-size: var(--typography-fontSize-base, 16px);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .fieldHint {
@@ -341,6 +360,7 @@
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--spacing-4, 24px);
   align-items: start;
+  min-width: 0;
 }
 
 .poArrivalMappingPoTitle {
@@ -488,10 +508,8 @@
 .linkedPoMetaValue {
   font-size: var(--typography-fontSize-small, 14px);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -666,6 +684,7 @@
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: var(--spacing-3, 16px);
   margin-bottom: var(--spacing-3, 16px);
+  min-width: 0;
 }
 
 .bidFormActions {
@@ -770,6 +789,7 @@
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: var(--spacing-2, 8px);
   margin-bottom: var(--spacing-2, 8px);
+  min-width: 0;
 }
 
 .bidQuotation {
@@ -882,6 +902,9 @@
 
 .input {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: var(--spacing-2, 10px) var(--spacing-3, 14px);
   font-size: var(--typography-fontSize-base, 16px);
   font-family: inherit;
@@ -898,6 +921,9 @@
 
 .fieldTextarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 5.5rem;
   padding: var(--spacing-2, 10px) var(--spacing-3, 14px);
   font-size: var(--typography-fontSize-base, 16px);
@@ -1220,7 +1246,8 @@
 
 .poDetailRow {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: var(--spacing-2, 8px);
   margin-bottom: var(--spacing-3, 16px);
 }
@@ -1230,11 +1257,17 @@
   font-weight: var(--typography-fontWeight-medium, 500);
   color: var(--color-primitive-text-steel, #6b6b6b);
   min-width: 90px;
+  flex-shrink: 0;
 }
 
 .poDetailValue {
   font-size: var(--typography-fontSize-base, 16px);
   color: var(--color-primitive-text-charcoal, #2b2b2b);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 
 .poItemsTable {
@@ -1833,6 +1866,39 @@
   color: var(--color-primitive-text-charcoal, #2b2b2b);
 }
 
+.shipmentDocCategoryTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  margin: 0 0 var(--spacing-2, 8px);
+  font-size: var(--typography-fontSize-base, 16px);
+  font-weight: var(--typography-fontWeight-semibold, 600);
+  color: var(--color-primitive-text-charcoal, #2b2b2b);
+}
+
+.shipmentDocCategoryTitleText {
+  flex: 1;
+  min-width: 0;
+}
+
+.shipmentDocLockIcon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
+.shipmentDocLockedHint {
+  margin: 0 0 var(--spacing-3, 12px);
+  padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+  font-size: var(--typography-fontSize-small, 13px);
+  line-height: 1.45;
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  background: var(--color-primitive-background-light, #f4f4f4);
+  border-radius: var(--borderRadius-md, 8px);
+  border: 1px solid var(--color-primitive-border-light, #e0e0e0);
+}
+
 .shipmentDocPerPoHint {
   margin: 0 0 var(--spacing-3, 12px);
   font-size: var(--typography-fontSize-small, 14px);
@@ -1857,6 +1923,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: var(--spacing-4, 16px);
+  min-width: 0;
 }
 
 .shipmentDocSub {
@@ -1864,6 +1931,16 @@
   border-radius: var(--borderRadius-md, 8px);
   padding: var(--spacing-3, 12px);
   background: var(--color-primitive-background-lighter, #fafafa);
+  transition: border-color 0.35s ease, box-shadow 0.35s ease, opacity 0.35s ease;
+}
+
+.shipmentDocSubLocked {
+  opacity: 0.92;
+}
+
+.shipmentDocSubUnlocked {
+  border-color: rgba(196, 58, 49, 0.35);
+  box-shadow: 0 0 0 1px rgba(196, 58, 49, 0.08);
 }
 
 .shipmentDocSubHeader {
