@@ -28,7 +28,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      NODE_ENV: production
+      NODE_ENV: deployment
       PORT: 3003
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
@@ -36,9 +36,10 @@ services:
         condition: service_healthy
     ports:
       - "3003:3003"
+    # Host must mount Synology first (e.g. //NAS/APPs -> /mnt/synology/eos). Without this bind,
+    # STORAGE_LOCAL_PATH under /mnt/synology/eos would be container-local disk, not the NAS.
     volumes:
-      - backend_uploads:/app/uploads
+      - /mnt/synology/eos:/mnt/synology/eos
 
 volumes:
   postgres_data:
-  backend_uploads:
