@@ -1835,6 +1835,13 @@
 
 /* —— Shipment documents —— */
 
+.shipmentDocSectionIntro {
+  margin: calc(var(--spacing-2, 8px) * -1) 0 var(--spacing-4, 24px);
+  font-size: var(--typography-fontSize-small, 14px);
+  line-height: 1.45;
+  color: var(--color-primitive-text-steel, #6b6b6b);
+}
+
 .shipmentDocCategories {
   display: flex;
   flex-direction: column;
@@ -1941,6 +1948,28 @@
 .shipmentDocSubUnlocked {
   border-color: rgba(196, 58, 49, 0.35);
   box-shadow: 0 0 0 1px rgba(196, 58, 49, 0.08);
+}
+
+.shipmentDocDropZone {
+  border-radius: var(--borderRadius-md, 8px);
+  transition: outline 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.shipmentDocDropZoneDragging {
+  outline: 2px dashed var(--color-semantic-primary-default, #c43a31);
+  outline-offset: 2px;
+  background: rgba(196, 58, 49, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(196, 58, 49, 0.12);
+}
+
+.shipmentDocDropHint {
+  margin: var(--spacing-2, 8px) 0 0;
+  padding-top: var(--spacing-2, 8px);
+  border-top: 1px dashed var(--color-primitive-border-light, #e0e0e0);
+  font-size: var(--typography-fontSize-xs, 12px);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  text-align: center;
+  line-height: 1.45;
 }
 
 .shipmentDocSubHeader {

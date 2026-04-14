@@ -551,6 +551,21 @@ export interface ShipmentCsvImportResult {
   imported_shipments: number;
   imported_rows: number;
   failed_rows: number;
+  /** Short human-readable outcome (counts + common failure reasons). */
+  summary: string;
   errors: ShipmentCsvImportErrorRow[];
+}
+
+export interface ShipmentImportHistoryRow {
+  id: string;
+  file_name: string | null;
+  uploaded_by: string;
+  total_rows: number;
+  imported_shipments: number;
+  imported_rows: number;
+  failed_rows: number;
+  status: string;
+  created_at: Date;
+  finished_at: Date | null;
 }
 

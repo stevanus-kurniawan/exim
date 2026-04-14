@@ -5,9 +5,19 @@
 import nodemailer from "nodemailer";
 import { config } from "../../../config/index.js";
 
+let warnedMissingSmtpAuth = false;
+
 function getTransporter(): nodemailer.Transporter | null {
   const { host, port, secure, user, pass } = config.smtp;
   if (!host) return null;
+  const hasAuth = Boolean(user && pass);
+  if (!hasAuth && host !== "localhost" && !warnedMissingSmtpAuth) {
+    warnedMissingSmtpAuth = true;
+    console.warn(
+      "[Email] SMTP_HOST is set but SMTP_USER and SMTP_PASS (or SMTP_PASSWORD) are not both set. " +
+        "The server will often reject mail with 550 Authentication is required for relay."
+    );
+  }
   const options = {
     host,
     port,

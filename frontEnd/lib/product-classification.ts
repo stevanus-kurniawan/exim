@@ -9,6 +9,11 @@ const LEGACY_TO_CURRENT: Record<string, string> = {
   Chemical: "Chemical",
   Checmical: "Chemical",
   Packaging: "Package",
+  "Spare Parts": "Spare Parts",
+  Sparepart: "Spare Parts",
+  "Spare part": "Spare Parts",
+  "Spare parts": "Spare Parts",
+  Spareparts: "Spare Parts",
 };
 
 /** Canonical display string for API/DB value (fixes historical "Checmical" typo). */

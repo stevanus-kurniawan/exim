@@ -15,6 +15,7 @@ import type {
 } from "@/types/po";
 import type { ApiResponse } from "@/types/api";
 import { config } from "@/lib/config";
+import { COOKIE_AUTH_SENTINEL } from "@/lib/constants";
 
 function buildQueryString(query: ListPoQuery): string {
   const params = new URLSearchParams();
@@ -124,8 +125,10 @@ export async function listPoImportHistory(
 export async function downloadPoImportTemplate(accessToken: string | null): Promise<Blob> {
   const url = `${config.apiBaseUrl}/po/import/template-csv`;
   const headers: Record<string, string> = {};
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-  const res = await fetch(url, { method: "GET", headers });
+  if (accessToken && accessToken !== COOKIE_AUTH_SENTINEL) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const res = await fetch(url, { method: "GET", headers, credentials: "include" });
   if (!res.ok) {
     throw new Error("Failed to download template");
   }

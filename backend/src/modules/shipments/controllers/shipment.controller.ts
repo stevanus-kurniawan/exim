@@ -19,6 +19,7 @@ import { ShipmentRepository } from "../repositories/shipment.repository.js";
 import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping.repository.js";
 import { ShipmentPoLineReceivedRepository } from "../repositories/shipment-po-line-received.repository.js";
 import type { ListShipmentsQuery } from "../dto/index.js";
+import { readMulterFileAsUtf8 } from "../../../utils/read-multer-upload.js";
 
 function actorFromRequest(req: Request): string {
   const name = req.user?.name?.trim();
@@ -260,16 +261,33 @@ export async function downloadCombinedImportTemplate(req: Request, res: Response
 
 export async function importCombinedCsv(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const file = req.file as { buffer?: Buffer } | undefined;
-    const csvText = file?.buffer ? file.buffer.toString("utf8") : typeof req.body?.csv_text === "string" ? req.body.csv_text : "";
+    let csvText = "";
+    if (req.file) {
+      csvText = await readMulterFileAsUtf8(req.file);
+    }
+    if (!csvText.trim() && typeof req.body?.csv_text === "string") {
+      csvText = req.body.csv_text;
+    }
     if (!csvText.trim()) {
       sendError(res, "CSV file is required", { statusCode: 400 });
       return;
     }
-    const result = await service.importCombinedFromCsv(csvText);
+    const actorName = actorFromRequest(req);
+    const result = await service.importCombinedFromCsv(csvText, actorName, req.file?.originalname ?? null);
     sendSuccess(res, result, {
       message: result.errors.length > 0 ? "Combined CSV imported with warnings" : "Combined CSV imported successfully",
     });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listShipmentImportHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const rawLimit = Number.parseInt(String(req.query.limit ?? "20"), 10);
+    const limit = Number.isNaN(rawLimit) ? 20 : rawLimit;
+    const rows = await service.listShipmentImportHistory(limit);
+    sendSuccess(res, rows);
   } catch (e) {
     next(e);
   }

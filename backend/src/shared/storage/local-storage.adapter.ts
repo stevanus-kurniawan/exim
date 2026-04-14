@@ -2,9 +2,10 @@
  * Local filesystem storage adapter. Placeholder for NFS/shared/object storage.
  */
 
-import { createReadStream, mkdirSync, existsSync, unlinkSync } from "fs";
-import { writeFile } from "fs/promises";
+import { createReadStream, createWriteStream, mkdirSync, existsSync, unlinkSync } from "fs";
+import { stat, unlink, writeFile } from "fs/promises";
 import { join } from "path";
+import { pipeline } from "stream/promises";
 import { config } from "../../config/index.js";
 import type {
   IStorageService,
@@ -79,6 +80,37 @@ export class LocalStorageAdapter implements IStorageService {
       mkdirSync(dir, { recursive: true });
     }
     await writeFile(fullPath, content);
+    return { storageKey };
+  }
+
+  async uploadFromPath(sourcePath: string, options: StorageUploadOptions): Promise<StorageUploadResult> {
+    const st = await stat(sourcePath);
+    if (st.size > MAX_FILE_SIZE_BYTES) {
+      await unlink(sourcePath).catch(() => {});
+      throw new Error(`File size exceeds ${MAX_FILE_SIZE_BYTES / 1024 / 1024} MB limit`);
+    }
+    const base = getBasePath();
+    const leaf = buildStorageLeafFileName(options.fileName, options.versionId);
+    const storageKey = options.directoryPrefix
+      ? `${options.directoryPrefix.replace(/\.\./g, "")}/${leaf}`
+      : `${options.documentId}/${leaf}`;
+    const fullPath = join(base, storageKey);
+    const dir = join(fullPath, "..");
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const rs = createReadStream(sourcePath);
+    const ws = createWriteStream(fullPath);
+    try {
+      await pipeline(rs, ws);
+    } catch (e) {
+      await unlink(sourcePath).catch(() => {});
+      if (existsSync(fullPath)) {
+        unlinkSync(fullPath);
+      }
+      throw e;
+    }
+    await unlink(sourcePath).catch(() => {});
     return { storageKey };
   }
 

@@ -159,6 +159,7 @@ export interface PoImportCsvResult {
   imported_pos: number;
   imported_rows: number;
   failed_rows: number;
+  summary: string;
   errors: PoImportCsvErrorRow[];
 }
 

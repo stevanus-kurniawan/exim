@@ -345,6 +345,20 @@ export interface ShipmentImportCsvResult {
   imported_shipments: number;
   imported_rows: number;
   failed_rows: number;
+  summary: string;
   errors: ShipmentImportCsvErrorRow[];
+}
+
+export interface ShipmentImportHistoryItem {
+  id: string;
+  file_name: string | null;
+  uploaded_by: string;
+  total_rows: number;
+  imported_shipments: number;
+  imported_rows: number;
+  failed_rows: number;
+  status: string;
+  created_at: string;
+  finished_at: string | null;
 }
 

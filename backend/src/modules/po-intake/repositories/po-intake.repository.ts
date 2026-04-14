@@ -2,7 +2,7 @@
  * PO intake repository: database access only. No business logic.
  */
 
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { getPool } from "../../../db/index.js";
 import type {
   CreatePoIntakeDto,
@@ -103,6 +103,93 @@ export class PoIntakeRepository {
       );
     }
     await this.recomputeTotalAmountPo(intakeId);
+  }
+
+  /**
+   * Single transaction: insert PO header + all lines in one batch INSERT (faster than row-by-row).
+   */
+  async createWithItemsInTransaction(
+    dto: CreatePoIntakeDto,
+    intakeStatus: string,
+    createdByUserId?: string | null
+  ): Promise<PoIntakeRow> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<PoIntakeRow>(
+        `INSERT INTO Import_purchase_order
+         (external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency, intake_status, total_amount_po, created_by_user_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, NOW(), NOW())
+         RETURNING id, external_id, po_number, plant, pt, supplier_name, delivery_location, incoterm_location, kawasan_berikat, currency,
+           intake_status, created_by_user_id, taken_by_user_id, taken_at, created_at, updated_at`,
+        [
+          dto.external_id,
+          dto.po_number,
+          dto.plant ?? null,
+          dto.pt ?? null,
+          dto.supplier_name,
+          dto.delivery_location ?? null,
+          dto.incoterm_location ?? null,
+          dto.kawasan_berikat ?? null,
+          dto.currency ?? null,
+          intakeStatus,
+          createdByUserId ?? null,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("PoIntakeRepository.createWithItemsInTransaction: no row returned");
+      await this.insertItemsBatch(client, row.id, dto.items);
+      await client.query(
+        `UPDATE Import_purchase_order p
+         SET total_amount_po = COALESCE((
+           SELECT SUM(COALESCE(i.total_amount_item, 0))
+           FROM Import_purchase_order_items i
+           WHERE i.intake_id = p.id
+         ), 0),
+         updated_at = NOW()
+         WHERE p.id = $1::uuid`,
+        [row.id]
+      );
+      await client.query("COMMIT");
+      return row;
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async insertItemsBatch(
+    client: PoolClient,
+    intakeId: string,
+    items: CreatePoIntakeDto["items"] | undefined
+  ): Promise<void> {
+    if (!items?.length) return;
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
+    let p = 1;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]!;
+      const qty = it?.qty ?? null;
+      const unitPrice = it?.value ?? null;
+      const totalAmountItem = qty != null && unitPrice != null ? qty * unitPrice : null;
+      placeholders.push(`($${p++}::uuid, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+      values.push(
+        intakeId,
+        it?.line_number ?? i + 1,
+        it?.item_description ?? null,
+        qty,
+        it?.unit ?? null,
+        unitPrice,
+        totalAmountItem
+      );
+    }
+    await client.query(
+      `INSERT INTO Import_purchase_order_items (intake_id, line_number, item_description, qty, unit, unit_price, total_amount_item)
+       VALUES ${placeholders.join(", ")}`,
+      values
+    );
   }
 
   async listItemIdsForIntake(intakeId: string): Promise<string[]> {

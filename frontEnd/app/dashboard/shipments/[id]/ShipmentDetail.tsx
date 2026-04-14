@@ -536,6 +536,16 @@ function DutyFormulaHint({ text }: { text: string }) {
 
 const SHIPMENT_DOC_FILE_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,image/*";
 
+/** Matches `accept` on the file input (PDF, Word, Excel, images). */
+function isAcceptedShipmentDocFile(file: File): boolean {
+  const n = file.name.toLowerCase();
+  if (n.endsWith(".pdf") || n.endsWith(".doc") || n.endsWith(".docx") || n.endsWith(".xls") || n.endsWith(".xlsx")) {
+    return true;
+  }
+  const t = (file.type ?? "").toLowerCase();
+  return t.startsWith("image/");
+}
+
 /**
  * Native label → file input (htmlFor). Avoids programmatic input.click(), which many browsers block
  * in embedded / cloud contexts (iframe, strict CSP-adjacent policies) while local top-level dev still works.
@@ -588,6 +598,7 @@ function ShipmentDocDropZone({
   canAct,
   onToastRestricted,
   onFile,
+  showDropHint,
   children,
 }: {
   className?: string;
@@ -595,17 +606,52 @@ function ShipmentDocDropZone({
   canAct: boolean;
   onToastRestricted: (reason: DocumentUploadBlockReason) => void;
   onFile: (file: File) => void;
+  /** Show helper text when this slot can accept drops. */
+  showDropHint?: boolean;
   children: React.ReactNode;
 }) {
+  const [dragDepth, setDragDepth] = useState(0);
+  const allowDropVisual = canAct && !blockReason;
+
+  const resetDragDepth = useCallback(() => {
+    setDragDepth(0);
+  }, []);
+
+  useEffect(() => {
+    const onWindowDragEnd = () => resetDragDepth();
+    window.addEventListener("dragend", onWindowDragEnd);
+    return () => window.removeEventListener("dragend", onWindowDragEnd);
+  }, [resetDragDepth]);
+
+  const onDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!allowDropVisual) return;
+    if (!Array.from(e.dataTransfer.types).includes("Files")) return;
+    setDragDepth((d) => d + 1);
+  };
+
+  const onDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!allowDropVisual) return;
+    const next = e.currentTarget;
+    const rel = e.relatedTarget as Node | null;
+    if (rel && next.contains(rel)) return;
+    setDragDepth((d) => Math.max(0, d - 1));
+  };
+
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     if (!canAct || blockReason) e.dataTransfer.dropEffect = "none";
     else e.dataTransfer.dropEffect = "copy";
   };
+
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    resetDragDepth();
     if (!canAct) return;
     if (blockReason) {
       onToastRestricted(blockReason);
@@ -614,9 +660,29 @@ function ShipmentDocDropZone({
     const f = e.dataTransfer.files?.[0];
     if (f) onFile(f);
   };
+
+  const rootClass = [
+    className,
+    styles.shipmentDocDropZone,
+    allowDropVisual && dragDepth > 0 ? styles.shipmentDocDropZoneDragging : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className={className} onDragOver={onDragOver} onDrop={onDrop}>
+    <div
+      className={rootClass}
+      role="region"
+      aria-label="Document upload"
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       {children}
+      {showDropHint && allowDropVisual ? (
+        <p className={styles.shipmentDocDropHint}>Drag and drop a file here, or use Upload.</p>
+      ) : null}
     </div>
   );
 }
@@ -1270,6 +1336,10 @@ export function ShipmentDetail({ id }: { id: string }) {
     });
     if (block) {
       pushToast(documentRestrictionToastMessage(block), "error");
+      return;
+    }
+    if (!isAcceptedShipmentDocFile(file)) {
+      pushToast("This file type is not accepted. Use PDF, Word, Excel, or an image.", "error");
       return;
     }
     const key = shipmentDocSlotKey(documentType, status, intakeId);
@@ -4150,6 +4220,11 @@ export function ShipmentDetail({ id }: { id: string }) {
 
       <Card className={styles.card} id="section-shipment-documents" data-tour="shipment-documents">
         <h2 className={styles.sectionTitle}>Documents</h2>
+        {canUploadDocument ? (
+          <p className={styles.shipmentDocSectionIntro} role="note">
+            Drag and drop a file onto a category panel, or use the Upload button for that slot.
+          </p>
+        ) : null}
         <div className={styles.shipmentDocCategories}>
           {getVisibleShipmentDocumentSlots(detail).map((slot) => {
             const slotDocKey = docKeyForDocumentType(slot.document_type);
@@ -4234,6 +4309,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                                   blockReason={blockReason}
                                   canAct={canUploadDocument}
                                   onToastRestricted={toastRestricted}
+                                  showDropHint
                                   onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f, po.intake_id)}
                                 >
                                   <div className={styles.shipmentDocSubHeader}>
@@ -4284,6 +4360,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                               blockReason={blockReason}
                               canAct={canUploadDocument}
                               onToastRestricted={toastRestricted}
+                              showDropHint
                               onFile={(f) => handleShipmentDocumentUpload(slot.document_type, st, f)}
                             >
                               <div className={styles.shipmentDocSubHeader}>
@@ -4308,6 +4385,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                         blockReason={blockReason}
                         canAct={canUploadDocument}
                         onToastRestricted={toastRestricted}
+                        showDropHint
                         onFile={(f) => handleShipmentDocumentUpload(slot.document_type, null, f)}
                       >
                         <div className={styles.shipmentDocSubHeader}>

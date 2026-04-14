@@ -24,6 +24,21 @@ import type {
   UpdatePoIntakeDto,
 } from "../dto/index.js";
 import { anyLinkedShipmentBlocksPoEdit } from "../utils/po-intake-shipment-lock.js";
+import {
+  PO_CSV_ALIASES,
+  PO_CSV_CANONICAL_FIELDS,
+} from "../../../shared/csv-import-aliases.js";
+import { buildPoCsvImportSummary } from "../../../shared/csv-import-summary.js";
+import {
+  csvCell,
+  detectCsvDelimiter,
+  parseCsvLine,
+  parseInternationalNumber,
+  resolveCsvColumnIndices,
+  splitCsvTextToDataLines,
+  stripBom,
+} from "../../../shared/csv-import-utils.js";
+import { PO_CSV_TEMPLATE_HINT_LINES } from "../../../shared/shipment-csv-template-hints.js";
 
 type ImportCsvRow = {
   row: number;
@@ -52,22 +67,6 @@ type GroupHeader = {
   currency?: string;
 };
 
-const MONITORING_CSV_HEADERS = [
-  "po_number",
-  "supplier_name",
-  "line_number",
-  "item_description",
-  "qty",
-  "unit",
-  "unit_price",
-  "plant",
-  "pt",
-  "delivery_location",
-  "incoterm_location",
-  "kawasan_berikat",
-  "currency",
-] as const;
-
 function toListItem(row: PoIntakeRow & { taken_by_name?: string | null }): PoIntakeListItem {
   return {
     id: row.id,
@@ -89,27 +88,6 @@ function toListItem(row: PoIntakeRow & { taken_by_name?: string | null }): PoInt
   };
 }
 
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let cur = "";
-  let inQuote = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    if (c === '"') {
-      inQuote = !inQuote;
-      continue;
-    }
-    if (!inQuote && c === ",") {
-      result.push(cur.trim());
-      cur = "";
-      continue;
-    }
-    cur += c;
-  }
-  result.push(cur.trim());
-  return result;
-}
-
 function normalizeOpt(raw: string): string | undefined {
   const t = raw.trim();
   return t.length > 0 ? t : undefined;
@@ -121,7 +99,7 @@ function parseRequiredNumber(raw: string, field: string, row: number, poNumber: 
     errors.push({ row, field, po_number: poNumber, message: `${field} is required` });
     return null;
   }
-  const n = Number(t);
+  const n = parseInternationalNumber(t) ?? Number(t);
   if (!Number.isFinite(n)) {
     errors.push({ row, field, po_number: poNumber, message: `${field} must be a valid number` });
     return null;
@@ -350,10 +328,11 @@ export class PoIntakeService {
   }
 
   getImportTemplateCsv(): string {
-    return `${MONITORING_CSV_HEADERS.join(",")}
-PO-0001,PT Supplier A,1,Caustic Soda Flakes,100,MT,1250.5,Plant A,PT EOS,Warehouse Merak,FOB Shanghai,Yes,USD
-PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,FOB Shanghai,Yes,USD
-`;
+    const header = PO_CSV_CANONICAL_FIELDS.join(",");
+    const row1 = "PO-0001,PT Supplier A,1,Caustic Soda Flakes,100,MT,1250.5,Plant A,PT EOS,Warehouse Merak,FOB Shanghai,Yes,USD";
+    const row2 = "PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,FOB Shanghai,Yes,USD";
+    const hints = PO_CSV_TEMPLATE_HINT_LINES.join("\n");
+    return `${header}\n${row1}\n${row2}\n${hints}\n`;
   }
 
   async importFromCsv(
@@ -362,29 +341,39 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
     fileName: string | null,
     createdByUserId?: string | null
   ): Promise<PoCsvImportResult> {
-    const lines = csvText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+    const lines = splitCsvTextToDataLines(csvText);
     if (lines.length < 2) {
       throw new AppError("CSV must include a header row and at least one data row", 400);
     }
 
-    const header = parseCsvLine(lines[0]!).map((h) => h.toLowerCase());
-    const missingHeaders = MONITORING_CSV_HEADERS.filter((h) => !header.includes(h));
+    const delim = detectCsvDelimiter(stripBom(lines[0]!));
+    const headerCells = parseCsvLine(stripBom(lines[0]!), delim);
+    const { indices, ambiguous } = resolveCsvColumnIndices(headerCells, PO_CSV_CANONICAL_FIELDS, PO_CSV_ALIASES);
+    if (ambiguous.length > 0) {
+      throw new AppError(
+        `Ambiguous CSV column(s) (multiple headers matched the same field): ${[...new Set(ambiguous)].join(", ")}`,
+        400
+      );
+    }
+    const missingHeaders = PO_CSV_CANONICAL_FIELDS.filter((k) => indices[k] === undefined);
     if (missingHeaders.length > 0) {
-      throw new AppError(`Missing required CSV header(s): ${missingHeaders.join(", ")}`, 400);
+      throw new AppError(
+        `Missing required CSV column(s): ${missingHeaders.join(", ")}. ` +
+          `You can use alternate header names (e.g. "PO Num" for po_number). ` +
+          `Excel often uses ";" as delimiter — that is detected automatically.`,
+        400
+      );
     }
 
-    const idx = (key: (typeof MONITORING_CSV_HEADERS)[number]) => header.indexOf(key);
+    const idx = (key: (typeof PO_CSV_CANONICAL_FIELDS)[number]) => indices[key]!;
     const errors: PoCsvImportErrorRow[] = [];
     const rows: ImportCsvRow[] = [];
 
     for (let i = 1; i < lines.length; i++) {
       const rowNumber = i + 1;
-      const cells = parseCsvLine(lines[i]!);
-      const poNumber = (cells[idx("po_number")] ?? "").trim();
-      const supplierName = (cells[idx("supplier_name")] ?? "").trim();
+      const cells = parseCsvLine(lines[i]!, delim);
+      const poNumber = csvCell(cells, idx("po_number")).trim();
+      const supplierName = csvCell(cells, idx("supplier_name")).trim();
 
       if (!poNumber) {
         errors.push({ row: rowNumber, field: "po_number", po_number: "", message: "po_number is required" });
@@ -393,14 +382,16 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
         errors.push({ row: rowNumber, field: "supplier_name", po_number: poNumber, message: "supplier_name is required" });
       }
 
-      const lineNumberRaw = parseRequiredNumber(cells[idx("line_number")] ?? "", "line_number", rowNumber, poNumber, errors);
-      const qtyRaw = parseRequiredNumber(cells[idx("qty")] ?? "", "qty", rowNumber, poNumber, errors);
-      const unitPriceText = (cells[idx("unit_price")] ?? "").trim();
-      const unitPrice = unitPriceText === "" ? undefined : Number(unitPriceText);
-      if (unitPriceText !== "" && (!Number.isFinite(unitPrice) || (unitPrice ?? 0) < 0)) {
+      const lineNumberRaw = parseRequiredNumber(csvCell(cells, idx("line_number")), "line_number", rowNumber, poNumber, errors);
+      const qtyRaw = parseRequiredNumber(csvCell(cells, idx("qty")), "qty", rowNumber, poNumber, errors);
+      const unitPriceText = csvCell(cells, idx("unit_price")).trim();
+      const unitPriceParsed =
+        unitPriceText === "" ? undefined : parseInternationalNumber(unitPriceText) ?? Number(unitPriceText);
+      const unitPrice = unitPriceText === "" ? undefined : unitPriceParsed;
+      if (unitPriceText !== "" && (!Number.isFinite(unitPrice as number) || (unitPrice as number) < 0)) {
         errors.push({ row: rowNumber, field: "unit_price", po_number: poNumber, message: "unit_price must be a non-negative number" });
       }
-      const kawasanText = (cells[idx("kawasan_berikat")] ?? "").trim();
+      const kawasanText = csvCell(cells, idx("kawasan_berikat")).trim();
       const kawasan = kawasanText === "" ? undefined : (/^yes$/i.test(kawasanText) ? "Yes" : /^no$/i.test(kawasanText) ? "No" : undefined);
       if (kawasanText !== "" && !kawasan) {
         errors.push({
@@ -426,15 +417,15 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
         supplier_name: supplierName,
         line_number: lineNumberRaw,
         qty: qtyRaw,
-        item_description: normalizeOpt(cells[idx("item_description")] ?? ""),
-        unit: normalizeOpt(cells[idx("unit")] ?? ""),
+        item_description: normalizeOpt(csvCell(cells, idx("item_description"))),
+        unit: normalizeOpt(csvCell(cells, idx("unit"))),
         unit_price: unitPrice,
-        plant: normalizeOpt(cells[idx("plant")] ?? ""),
-        pt: normalizeOpt(cells[idx("pt")] ?? ""),
-        delivery_location: normalizeOpt(cells[idx("delivery_location")] ?? ""),
-        incoterm_location: normalizeOpt(cells[idx("incoterm_location")] ?? ""),
+        plant: normalizeOpt(csvCell(cells, idx("plant"))),
+        pt: normalizeOpt(csvCell(cells, idx("pt"))),
+        delivery_location: normalizeOpt(csvCell(cells, idx("delivery_location"))),
+        incoterm_location: normalizeOpt(csvCell(cells, idx("incoterm_location"))),
         kawasan_berikat: kawasan,
-        currency: normalizeOpt((cells[idx("currency")] ?? "").toUpperCase()),
+        currency: normalizeOpt(csvCell(cells, idx("currency")).toUpperCase()),
       });
     }
 
@@ -515,7 +506,7 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
 
       try {
         const externalId = await generateExternalId(this.repo, sample.po_number);
-        await this.create(
+        await this.repo.createWithItemsInTransaction(
           {
             external_id: externalId,
             po_number: sample.po_number,
@@ -534,7 +525,8 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
               value: r.unit_price,
             })),
           },
-          { createdByUserId }
+          "NEW_PO_DETECTED",
+          createdByUserId
         );
         importedPos += 1;
         importedRows += poRows.length;
@@ -551,8 +543,10 @@ PO-0001,PT Supplier A,2,Soda Ash Dense,50,MT,850,Plant A,PT EOS,Warehouse Merak,
       imported_pos: importedPos,
       imported_rows: importedRows,
       failed_rows: (lines.length - 1) - importedRows,
+      summary: "",
       errors: errors.sort((a, b) => a.row - b.row),
     };
+    result.summary = buildPoCsvImportSummary(result);
 
     const status = result.imported_rows === 0 ? "FAILED" : result.errors.length > 0 ? "PARTIAL" : "SUCCESS";
     await this.repo.createImportHistory({
