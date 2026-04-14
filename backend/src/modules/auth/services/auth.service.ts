@@ -156,7 +156,7 @@ export class AuthService {
     await this.verificationTokenRepo.deleteByToken(token);
   }
 
-  async forgotPassword(email: string): Promise<void> {
+  async forgotPassword(email: string, userAgent?: string): Promise<void> {
     const user = await this.userRepo.findByEmail(email.trim().toLowerCase());
     if (!user) {
       // Do not reveal whether email exists
@@ -166,7 +166,7 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
     await this.passwordResetTokenRepo.deleteByUserId(user.id);
     await this.passwordResetTokenRepo.create({ userId: user.id, token, expiresAt });
-    await sendPasswordResetEmail(user.email, user.name, token);
+    await sendPasswordResetEmail(user.email, user.name, token, userAgent);
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {

@@ -21,6 +21,12 @@ poIntakeRoutes.post(
 );
 poIntakeRoutes.get("/", authMiddleware, requirePermission(PERMISSIONS.VIEW_PO_INTAKE), controller.list);
 poIntakeRoutes.get(
+  "/list-filter-options",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_PO_INTAKE),
+  controller.listFilterOptions
+);
+poIntakeRoutes.get(
   "/lookup-by-po-number",
   authMiddleware,
   requirePermission(PERMISSIONS.VIEW_PO_INTAKE),

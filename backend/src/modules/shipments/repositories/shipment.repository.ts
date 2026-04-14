@@ -36,7 +36,8 @@ export class ShipmentRepository {
     closed_at, close_reason, remarks, created_at, updated_at,
     pib_type, no_request_pib, ppjk_mkl, nopen, nopen_date, ship_by, bl_awb, insurance_no, coo, incoterm_amount, cbm, net_weight_mt, gross_weight_mt, bm, ppn_amount, pph_amount, kawasan_berikat, surveyor,
     product_classification,
-    unit_20ft, unit_40ft, unit_package, unit_20_iso_tank, container_count_20ft, container_count_40ft, package_count, container_count_20_iso_tank`;
+    unit_20ft, unit_40ft, unit_package, unit_20_iso_tank, container_count_20ft, container_count_40ft, package_count, container_count_20_iso_tank,
+    deleted_at, deleted_by`;
 
   async create(dto: CreateShipmentDto, shipmentNo: string): Promise<ShipmentRow> {
     const etd = dto.etd ? new Date(dto.etd) : null;
@@ -93,7 +94,7 @@ export class ShipmentRepository {
 
   async findById(id: string): Promise<ShipmentRow | null> {
     const result = await this.pool.query<ShipmentRow>(
-      `SELECT ${this.selectColumns} FROM shipments WHERE id = $1`,
+      `SELECT ${this.selectColumns} FROM shipments WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     );
     return result.rows[0] ?? null;
@@ -101,7 +102,7 @@ export class ShipmentRepository {
 
   async findByShipmentNo(shipmentNo: string): Promise<ShipmentRow | null> {
     const result = await this.pool.query<ShipmentRow>(
-      `SELECT ${this.selectColumns} FROM shipments WHERE LOWER(TRIM(shipment_no)) = LOWER(TRIM($1)) LIMIT 1`,
+      `SELECT ${this.selectColumns} FROM shipments WHERE LOWER(TRIM(shipment_no)) = LOWER(TRIM($1)) AND deleted_at IS NULL LIMIT 1`,
       [shipmentNo]
     );
     return result.rows[0] ?? null;
@@ -111,7 +112,7 @@ export class ShipmentRepository {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(100, Math.max(1, query.limit ?? 10));
     const offset = (page - 1) * limit;
-    const conditions: string[] = ["1=1"];
+    const conditions: string[] = ["s.deleted_at IS NULL"];
     const params: unknown[] = [];
     let idx = 1;
 
@@ -463,15 +464,16 @@ export class ShipmentRepository {
       destResult,
     ] = await Promise.all([
       this.pool.query<{ s: string }>(
-        `SELECT DISTINCT s.current_status AS s FROM shipments s ORDER BY s`
+        `SELECT DISTINCT s.current_status AS s FROM shipments s WHERE s.deleted_at IS NULL ORDER BY s`
       ),
       this.pool.query<{ n: string }>(
-        `SELECT DISTINCT s.shipment_no AS n FROM shipments s ORDER BY n`
+        `SELECT DISTINCT s.shipment_no AS n FROM shipments s WHERE s.deleted_at IS NULL ORDER BY n`
       ),
       this.pool.query<{ pt: string }>(
         `SELECT DISTINCT TRIM(COALESCE(i.pt, '')) AS pt
          FROM Import_purchase_order i
          INNER JOIN shipment_po_mapping m ON m.intake_id = i.id AND m.decoupled_at IS NULL
+         INNER JOIN shipments s ON s.id = m.shipment_id AND s.deleted_at IS NULL
          WHERE TRIM(COALESCE(i.pt, '')) <> ''
          ORDER BY pt`
       ),
@@ -479,68 +481,71 @@ export class ShipmentRepository {
         `SELECT DISTINCT TRIM(COALESCE(i.plant, '')) AS plant
          FROM Import_purchase_order i
          INNER JOIN shipment_po_mapping m ON m.intake_id = i.id AND m.decoupled_at IS NULL
+         INNER JOIN shipments s ON s.id = m.shipment_id AND s.deleted_at IS NULL
          WHERE TRIM(COALESCE(i.plant, '')) <> ''
          ORDER BY plant`
       ),
       this.pool.query<{ v: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.vendor_name, '')) AS v
          FROM shipments s
-         WHERE TRIM(COALESCE(s.vendor_name, '')) <> ''
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.vendor_name, '')) <> ''
          ORDER BY v`
       ),
       this.pool.query<{ po: string }>(
         `SELECT DISTINCT i.po_number AS po
          FROM Import_purchase_order i
          INNER JOIN shipment_po_mapping m ON m.intake_id = i.id AND m.decoupled_at IS NULL
+         INNER JOIN shipments s ON s.id = m.shipment_id AND s.deleted_at IS NULL
          ORDER BY po`
       ),
       this.pool.query<{ inc: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.incoterm, '')) AS inc FROM shipments s
-         WHERE TRIM(COALESCE(s.incoterm, '')) <> '' ORDER BY inc`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.incoterm, '')) <> '' ORDER BY inc`
       ),
       this.pool.query<{ pib: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.pib_type, '')) AS pib FROM shipments s
-         WHERE TRIM(COALESCE(s.pib_type, '')) <> '' ORDER BY pib`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.pib_type, '')) <> '' ORDER BY pib`
       ),
       this.pool.query<{ sm: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.shipment_method, '')) AS sm FROM shipments s
-         WHERE TRIM(COALESCE(s.shipment_method, '')) <> '' ORDER BY sm`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.shipment_method, '')) <> '' ORDER BY sm`
       ),
       this.pool.query<{ pc: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.product_classification, '')) AS pc FROM shipments s
-         WHERE TRIM(COALESCE(s.product_classification, '')) <> '' ORDER BY pc`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.product_classification, '')) <> '' ORDER BY pc`
       ),
       this.pool.query<{ sb: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.ship_by, '')) AS sb FROM shipments s
-         WHERE TRIM(COALESCE(s.ship_by, '')) <> '' ORDER BY sb`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.ship_by, '')) <> '' ORDER BY sb`
       ),
       this.pool.query<{ fn: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.forwarder_name, '')) AS fn FROM shipments s
-         WHERE TRIM(COALESCE(s.forwarder_name, '')) <> '' ORDER BY fn`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.forwarder_name, '')) <> '' ORDER BY fn`
       ),
       this.pool.query<{ pic: string }>(
         `SELECT DISTINCT TRIM(COALESCE(u.name, '')) AS pic
          FROM shipment_po_mapping m
          JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
+         INNER JOIN shipments s ON s.id = m.shipment_id AND s.deleted_at IS NULL
          LEFT JOIN users u ON u.id::text = i.taken_by_user_id
          WHERE TRIM(COALESCE(u.name, '')) <> ''
          ORDER BY pic`
       ),
       this.pool.query<{ d: string }>(
         `SELECT DISTINCT to_char((s.etd AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d
-         FROM shipments s WHERE s.etd IS NOT NULL ORDER BY d`
+         FROM shipments s WHERE s.deleted_at IS NULL AND s.etd IS NOT NULL ORDER BY d`
       ),
       this.pool.query<{ d: string }>(
         `SELECT DISTINCT to_char((s.eta AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d
-         FROM shipments s WHERE s.eta IS NOT NULL ORDER BY d`
+         FROM shipments s WHERE s.deleted_at IS NULL AND s.eta IS NOT NULL ORDER BY d`
       ),
       this.pool.query<{ o: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.origin_port_name, '')) AS o FROM shipments s
-         WHERE TRIM(COALESCE(s.origin_port_name, '')) <> '' ORDER BY o`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.origin_port_name, '')) <> '' ORDER BY o`
       ),
       this.pool.query<{ d: string }>(
         `SELECT DISTINCT TRIM(COALESCE(s.destination_port_name, '')) AS d FROM shipments s
-         WHERE TRIM(COALESCE(s.destination_port_name, '')) <> '' ORDER BY d`
+         WHERE s.deleted_at IS NULL AND TRIM(COALESCE(s.destination_port_name, '')) <> '' ORDER BY d`
       ),
     ]);
     return {
@@ -773,7 +778,7 @@ export class ShipmentRepository {
     if (params.length === 0) return this.findById(id);
     params.push(id);
     const result = await this.pool.query<ShipmentRow>(
-      `UPDATE shipments SET ${updates.join(", ")} WHERE id = $${idx} RETURNING ${this.selectColumns}`,
+      `UPDATE shipments SET ${updates.join(", ")} WHERE id = $${idx} AND deleted_at IS NULL RETURNING ${this.selectColumns}`,
       params
     );
     return result.rows[0] ?? null;
@@ -781,7 +786,7 @@ export class ShipmentRepository {
 
   async close(id: string, reason: string | null): Promise<ShipmentRow | null> {
     const result = await this.pool.query<ShipmentRow>(
-      `UPDATE shipments SET closed_at = NOW(), close_reason = $1, updated_at = NOW() WHERE id = $2 RETURNING ${this.selectColumns}`,
+      `UPDATE shipments SET closed_at = NOW(), close_reason = $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL RETURNING ${this.selectColumns}`,
       [reason, id]
     );
     return result.rows[0] ?? null;
@@ -789,7 +794,7 @@ export class ShipmentRepository {
 
   async updateCurrentStatus(id: string, currentStatus: string): Promise<ShipmentRow | null> {
     const result = await this.pool.query<ShipmentRow>(
-      `UPDATE shipments SET current_status = $1, updated_at = NOW() WHERE id = $2 RETURNING ${this.selectColumns}`,
+      `UPDATE shipments SET current_status = $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL RETURNING ${this.selectColumns}`,
       [currentStatus, id]
     );
     return result.rows[0] ?? null;
@@ -797,7 +802,21 @@ export class ShipmentRepository {
 
   /** Persist system-calculated BM (not exposed on public update API). */
   async updateComputedBm(id: string, bm: number): Promise<void> {
-    await this.pool.query(`UPDATE shipments SET bm = $1, updated_at = NOW() WHERE id = $2`, [bm, id]);
+    await this.pool.query(`UPDATE shipments SET bm = $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL`, [
+      bm,
+      id,
+    ]);
+  }
+
+  /** Soft delete: row stays in DB; operational queries exclude `deleted_at IS NULL`. */
+  async softDelete(id: string, deletedBy: string | null): Promise<ShipmentRow | null> {
+    const result = await this.pool.query<ShipmentRow>(
+      `UPDATE shipments SET deleted_at = NOW(), deleted_by = $2, updated_at = NOW()
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING ${this.selectColumns}`,
+      [id, deletedBy]
+    );
+    return result.rows[0] ?? null;
   }
 
   async createShipmentImportHistory(input: {

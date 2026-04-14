@@ -34,9 +34,9 @@ export const GUIDE_TOUR_STEPS: GuideTourStepsByRoute = {
     },
     {
       target: '[data-tour="po-primary-actions"]',
-      title: "Claim & couple",
+      title: "Claim, new shipment & couple",
       content:
-        "Claim (when shown) takes ownership and can create a shipment from this PO. Couple to shipment links this PO to an existing open shipment that matches grouping rules (incoterm, currency, etc.). These are the main day-to-day operations after a PO is detected.",
+        "Claim (when shown) takes ownership and creates the first shipment from this PO. Create another shipment appears once this PO is already linked—use it when you need a second new shipment while the first is still in progress (split cargo, second voyage). Couple to shipment attaches this PO to an existing open shipment that matches grouping rules (incoterm, currency, etc.).",
       placement: "top",
       skipBeacon: true,
     },

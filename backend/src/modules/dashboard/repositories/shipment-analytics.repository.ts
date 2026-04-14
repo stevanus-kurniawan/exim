@@ -65,6 +65,7 @@ const FIRST_PO_CTE = `first_po AS (
     NULLIF(TRIM(i.pt), '') AS pt,
     NULLIF(TRIM(i.plant), '') AS plant
   FROM shipment_po_mapping m
+  INNER JOIN shipments s ON s.id = m.shipment_id AND s.deleted_at IS NULL
   INNER JOIN Import_purchase_order i ON i.id = m.intake_id AND m.decoupled_at IS NULL
   ORDER BY m.shipment_id, i.po_number ASC NULLS LAST, i.created_at ASC
 )`;
@@ -73,6 +74,7 @@ function buildBaseWhereParams(q: ShipmentAnalyticsQuery): { whereParts: string[]
   const whereParts: string[] = [
     `(s.created_at AT TIME ZONE 'UTC')::date >= $1::date`,
     `(s.created_at AT TIME ZONE 'UTC')::date <= $2::date`,
+    `s.deleted_at IS NULL`,
   ];
   const params: unknown[] = [q.date_from, q.date_to];
   let idx = 3;
@@ -292,7 +294,8 @@ export class ShipmentAnalyticsRepository {
         this.pool.query<{ v: string }>(
           `SELECT DISTINCT TRIM(s.vendor_name) AS v
            FROM shipments s
-           WHERE (s.created_at AT TIME ZONE 'UTC')::date >= $1::date
+           WHERE s.deleted_at IS NULL
+             AND (s.created_at AT TIME ZONE 'UTC')::date >= $1::date
              AND (s.created_at AT TIME ZONE 'UTC')::date <= $2::date
              AND TRIM(COALESCE(s.vendor_name, '')) <> ''
            ORDER BY 1

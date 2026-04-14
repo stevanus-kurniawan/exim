@@ -287,6 +287,9 @@ export interface ShipmentRow {
   container_count_40ft: number | null;
   package_count: number | null;
   container_count_20_iso_tank: number | null;
+  /** When set, shipment is soft-deleted (hidden from lists and detail). */
+  deleted_at: Date | null;
+  deleted_by: string | null;
 }
 
 export interface ShipmentListItem {

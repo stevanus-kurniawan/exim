@@ -107,6 +107,12 @@ export const config = {
     /** Base URL of frontend for verification and reset links (e.g. http://localhost:3000). */
     frontendBaseUrl: getEnvOptional("FRONTEND_BASE_URL", "http://localhost:3000") ?? "http://localhost:3000",
   },
+  /** Display name and assets for transactional emails (password reset, etc.). */
+  email: {
+    appName: getEnvOptional("EMAIL_APP_NAME", "EOS") ?? "EOS",
+    /** Absolute URL to logo image; if unset, defaults to FRONTEND_BASE_URL/faveicon/android-chrome-192x192.png */
+    logoUrl: getEnvOptional("EMAIL_LOGO_URL"),
+  },
   /** IDR per 1 USD for dashboard procurement report (PO lines in IDR → US$). Optional; default 16500. */
   dashboard: {
     idrPerUsd: (() => {

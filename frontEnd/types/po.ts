@@ -34,6 +34,41 @@ export interface ListPoQuery {
   has_linked_shipment?: boolean;
   /** Stale “detected” filter: `created_at` older than N full days. */
   detected_older_than_days?: number;
+  /** Column filters (multi-select); combined with AND on the server. */
+  po_numbers?: string[];
+  external_ids?: string[];
+  pts?: string[];
+  plants?: string[];
+  supplier_names?: string[];
+  delivery_locations?: string[];
+  incoterm_locations?: string[];
+  kawasan_berikats?: string[];
+  currencies?: string[];
+  intake_statuses?: string[];
+  taken_by_user_ids?: string[];
+  taken_by_names?: string[];
+  taken_at_dates?: string[];
+  created_at_dates?: string[];
+  updated_at_dates?: string[];
+}
+
+/** GET /po/list-filter-options */
+export interface PoListFilterOptions {
+  po_numbers: string[];
+  external_ids: string[];
+  pts: string[];
+  plants: string[];
+  supplier_names: string[];
+  delivery_locations: string[];
+  incoterm_locations: string[];
+  kawasan_berikats: string[];
+  currencies: string[];
+  intake_statuses: string[];
+  taken_by_user_ids: string[];
+  taken_by_names: string[];
+  taken_at_dates: string[];
+  created_at_dates: string[];
+  updated_at_dates: string[];
 }
 
 export interface ListPoMeta {

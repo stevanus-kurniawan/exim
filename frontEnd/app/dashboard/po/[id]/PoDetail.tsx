@@ -39,7 +39,7 @@ import { can } from "@/lib/permissions";
 import { anyLinkedShipmentBlocksPoEdit, PO_EDIT_BLOCKED_BY_SHIPMENT_MESSAGE } from "@/lib/po-shipment-edit-lock";
 import { isApiError } from "@/types/api";
 import type { PoDetail as PoDetailType, PoIntakeActivityItem } from "@/types/po";
-import { listShipments } from "@/services/shipments-service";
+import { listShipments, softDeleteShipment } from "@/services/shipments-service";
 import type { ShipmentListItem } from "@/types/shipments";
 import styles from "./PoDetail.module.css";
 
@@ -90,6 +90,10 @@ export function PoDetail({ id }: { id: string }) {
   const [coupleShipmentsList, setCoupleShipmentsList] = useState<ShipmentListItem[]>([]);
   const [coupleShipmentsLoading, setCoupleShipmentsLoading] = useState(false);
   const [coupleShipmentsError, setCoupleShipmentsError] = useState<string | null>(null);
+  const [creatingAnotherShipment, setCreatingAnotherShipment] = useState(false);
+  const [createAnotherConfirmOpen, setCreateAnotherConfirmOpen] = useState(false);
+  const [removeShipmentId, setRemoveShipmentId] = useState<string | null>(null);
+  const [removingShipment, setRemovingShipment] = useState(false);
   const [expandedLinkedShipmentIds, setExpandedLinkedShipmentIds] = useState<Set<string>>(() => new Set());
   const [portalMounted, setPortalMounted] = useState(false);
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
@@ -265,6 +269,56 @@ export function PoDetail({ id }: { id: string }) {
       .finally(() => setCoupling(false));
   }
 
+  function handleConfirmRemoveLinkedShipment() {
+    if (!accessToken || !removeShipmentId) return;
+    const shipmentId = removeShipmentId;
+    setRemovingShipment(true);
+    setActionError(null);
+    softDeleteShipment(shipmentId, accessToken)
+      .then((res) => {
+        if (isApiError(res)) {
+          setActionError(res.message);
+          pushToast(res.message, "error");
+          return;
+        }
+        pushToast("Shipment removed from the active list. Linked Purchase Orders were detached.", "success");
+        setExpandedLinkedShipmentIds((prev) => {
+          const next = new Set(prev);
+          next.delete(shipmentId);
+          return next;
+        });
+        load();
+      })
+      .finally(() => {
+        setRemovingShipment(false);
+        setRemoveShipmentId(null);
+      });
+  }
+
+  function handleCreateAnotherShipment() {
+    if (!accessToken || !id) return;
+    if (!can(user, "CREATE_SHIPMENT")) return;
+    setCreateAnotherConfirmOpen(false);
+    setActionError(null);
+    setCreatingAnotherShipment(true);
+    createShipmentFromPo(id, accessToken)
+      .then((res) => {
+        if (isApiError(res)) {
+          setActionError(res.message);
+          pushToast(res.message, "error");
+          return;
+        }
+        pushToast("New shipment created and linked to this Purchase Order.", "success");
+        const data = res.data as { shipment_id?: string };
+        if (data?.shipment_id) {
+          router.push(`/dashboard/shipments/${data.shipment_id}`);
+        } else {
+          load();
+        }
+      })
+      .finally(() => setCreatingAnotherShipment(false));
+  }
+
   if (loading) return <LoadingSkeleton lines={6} className={styles.loading} />;
   if (error) return <p className={styles.error}>{error}</p>;
   if (!detail) return null;
@@ -287,6 +341,10 @@ export function PoDetail({ id }: { id: string }) {
   const canClaimAndCreateShipment =
     can(user, "TAKE_OWNERSHIP") && can(user, "CREATE_SHIPMENT");
   const canCoupleToShipment = can(user, "COUPLE_DECOUPLE_PO");
+  /** Second (or later) new shipment while links already exist — same API as first leg after Claim. */
+  const canCreateAnotherShipment =
+    canCreateOrCouple && can(user, "CREATE_SHIPMENT") && linkedShipments.length > 0;
+  const canRemoveLinkedShipment = can(user, "UPDATE_SHIPMENT");
 
   /** Same field as Create PO / API `currency` (e.g. USD, IDR) — not the per-line rate. */
   const poCurrency = detail.currency?.trim() || null;
@@ -396,6 +454,18 @@ export function PoDetail({ id }: { id: string }) {
               Edit Purchase Order
             </Link>
           )}
+          {canCreateAnotherShipment && (
+            <button
+              type="button"
+              className={styles.actionOutline}
+              data-tour="po-create-another-shipment"
+              title="Split cargo or start a second voyage while the first shipment is still in progress."
+              onClick={() => setCreateAnotherConfirmOpen(true)}
+              disabled={creatingAnotherShipment || taking}
+            >
+              {creatingAnotherShipment ? "Creating shipment…" : "Create another shipment"}
+            </button>
+          )}
           {canCreateOrCouple && canCoupleToShipment && (
             <button
               type="button"
@@ -407,6 +477,14 @@ export function PoDetail({ id }: { id: string }) {
             >
               Couple to shipment
             </button>
+          )}
+          {canCreateAnotherShipment && (
+            <p className={styles.multiAllocationHint}>
+              This PO can stay on several active shipments at the same time—for example split cargo or a second
+              booking while the first is still underway. If ship mode is Bulk on those shipments, delivered quantities
+              count together toward each line&apos;s limit. To use an existing open shipment instead, choose Couple to
+              shipment.
+            </p>
           )}
           {canTakeAgain && (
             <span className={styles.claimAgainHint}>
@@ -471,7 +549,8 @@ export function PoDetail({ id }: { id: string }) {
         <Card className={styles.cardSpacing}>
           <h2 className={styles.sectionTitle}>Shipments linked to this Purchase Order</h2>
           <p className={styles.linkedShipmentsHint}>
-            Expand a row to see quantity delivered on that shipment, by line.
+            One PO can link to several shipments at once. Expand a row to see quantity delivered on that shipment, by
+            line.
           </p>
           <Table>
             <TableHead>
@@ -484,6 +563,7 @@ export function PoDetail({ id }: { id: string }) {
                 <TableHeaderCell>Actual time departure</TableHeaderCell>
                 <TableHeaderCell>Actual time arrival</TableHeaderCell>
                 <TableHeaderCell>Delivered at</TableHeaderCell>
+                {canRemoveLinkedShipment && <TableHeaderCell className={styles.linkedShipmentActionsCol}>Actions</TableHeaderCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -526,10 +606,21 @@ export function PoDetail({ id }: { id: string }) {
                       <TableCell>{formatDayMonthYear(ship.atd)}</TableCell>
                       <TableCell>{formatDayMonthYear(ship.ata)}</TableCell>
                       <TableCell>{formatDayMonthYear(ship.delivered_at)}</TableCell>
+                      {canRemoveLinkedShipment && (
+                        <TableCell className={styles.linkedShipmentActionsCol}>
+                          <button
+                            type="button"
+                            className={styles.removeLinkedShipmentBtn}
+                            onClick={() => setRemoveShipmentId(ship.shipment_id)}
+                          >
+                            Remove
+                          </button>
+                        </TableCell>
+                      )}
                     </TableRow>
                     {expanded && (
                       <TableRow className={styles.nestedLinesRow}>
-                        <TableCell colSpan={8}>
+                        <TableCell colSpan={canRemoveLinkedShipment ? 9 : 8}>
                           <div
                             id={`po-linked-shipment-lines-${ship.shipment_id}`}
                             className={styles.nestedLinesPanel}
@@ -569,6 +660,68 @@ export function PoDetail({ id }: { id: string }) {
       )}
 
       <Modal
+        open={removeShipmentId != null}
+        onClose={() => {
+          if (!removingShipment) setRemoveShipmentId(null);
+        }}
+        title="Remove this shipment?"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={handleConfirmRemoveLinkedShipment}
+              disabled={removingShipment}
+              className={styles.removeShipmentConfirmBtn}
+            >
+              {removingShipment ? "Removing…" : "Yes, remove shipment"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => !removingShipment && setRemoveShipmentId(null)}
+              disabled={removingShipment}
+            >
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        {removeShipmentId != null && (
+          <p className={styles.coupleModalHint}>
+            You are about to remove this shipment. This will disconnect it from its Purchase Orders and hide it from your
+            workspace. You will not be able to restore this shipment later.
+          </p>
+        )}
+      </Modal>
+
+      <Modal
+        open={createAnotherConfirmOpen}
+        onClose={() => setCreateAnotherConfirmOpen(false)}
+        title="Create another shipment?"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={handleCreateAnotherShipment}
+              disabled={creatingAnotherShipment || taking}
+            >
+              {creatingAnotherShipment ? "Creating…" : "Create shipment"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setCreateAnotherConfirmOpen(false)} disabled={creatingAnotherShipment}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <p className={styles.coupleModalHint}>
+          This will generate a new shipment record linked to this Purchase Order. Use this for split cargo or secondary
+          bookings.
+        </p>
+      </Modal>
+
+      <Modal
         open={coupleModal}
         onClose={() => {
           setCoupleModal(false);
@@ -599,7 +752,10 @@ export function PoDetail({ id }: { id: string }) {
         {coupleShipmentsLoading && <p className={styles.fieldValue}>Loading shipments…</p>}
         {coupleShipmentsError && <p className={styles.error}>{coupleShipmentsError}</p>}
         {!coupleShipmentsLoading && !coupleShipmentsError && eligibleCoupleShipments.length === 0 && (
-          <p className={styles.fieldValue}>No matching open shipments found. Use the shipment ID field below or create a shipment via Claim.</p>
+          <p className={styles.fieldValue}>
+            No matching open shipments found. Use Create another shipment on this PO page, paste a shipment UUID below,
+            or use Claim if you have not created a shipment yet.
+          </p>
         )}
         {eligibleCoupleShipments.length > 0 && (
           <ul className={styles.coupleCandidateList} aria-label="Shipments available to couple">
