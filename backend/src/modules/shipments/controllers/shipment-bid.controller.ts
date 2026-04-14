@@ -3,6 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
+import { unlink } from "fs/promises";
 import { sendSuccess, sendError } from "../../../shared/response.js";
 import { validateCreateBidBody, validateUpdateBidBody } from "../validators/index.js";
 import { ShipmentBidRepository } from "../repositories/shipment-bid.repository.js";
@@ -178,13 +179,14 @@ export async function deleteBid(req: Request, res: Response, next: NextFunction)
   }
 }
 
-type MulterFile = { buffer: Buffer; originalname: string; mimetype?: string };
+type MulterFile = { path?: string; buffer?: Buffer; originalname: string; mimetype?: string };
 
 export async function uploadQuotation(req: Request, res: Response, next: NextFunction): Promise<void> {
   const shipmentId = req.params.id as string;
   const bidId = req.params.bidId as string;
   const file = (req as Request & { file?: MulterFile }).file;
-  if (!file?.buffer) {
+  const tempPath = file?.path;
+  if (!tempPath) {
     sendError(res, "File is required", { statusCode: 400 });
     return;
   }
@@ -198,7 +200,7 @@ export async function uploadQuotation(req: Request, res: Response, next: NextFun
       await storage.delete(bid.quotation_storage_key);
     }
     const fileName = file.originalname || "quotation";
-    const result = await storage.upload(file.buffer, {
+    const result = await storage.uploadFromPath(tempPath, {
       documentId: shipmentId,
       versionId: bidId,
       fileName,
@@ -215,6 +217,8 @@ export async function uploadQuotation(req: Request, res: Response, next: NextFun
     sendSuccess(res, toBidResponse(updated), { message: "Quotation uploaded successfully" });
   } catch (e) {
     next(e);
+  } finally {
+    await unlink(tempPath).catch(() => {});
   }
 }
 

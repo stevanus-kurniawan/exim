@@ -1,11 +1,13 @@
 /**
  * API client abstraction — fetch, auth headers, single-flight refresh on 401 (browser).
+ * Auth uses HttpOnly cookies + credentials; Authorization Bearer optional for legacy.
  */
 
 import { config } from "@/lib/config";
+import { COOKIE_AUTH_SENTINEL } from "@/lib/constants";
 import type { ApiResponse, ApiError } from "@/types/api";
 import type { RefreshResponseData } from "@/types/auth";
-import { getAccessToken, getRefreshToken, setTokens, clearTokens } from "@/lib/cookies";
+import { getAccessToken, clearTokens } from "@/lib/cookies";
 
 /**
  * Client: relative `/api/backend/...` is fine. Server (RSC / SSR): must be absolute; defaults to this Next process.
@@ -25,12 +27,12 @@ function resolveRequestUrl(path: string): string {
 
 export interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
-  /** If provided, access token is sent as Bearer (browser falls back to cookie when omitted). */
+  /** If provided, sent as Bearer unless sentinel `cookie` (HttpOnly session). */
   accessToken?: string | null;
 }
 
 function getHeaders(
-  accessToken?: string | null,
+  accessToken: string | null | undefined,
   customHeaders?: Record<string, string>,
   body?: unknown
 ): Record<string, string> {
@@ -38,7 +40,9 @@ function getHeaders(
   if (body != null && !(body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
-  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+  if (accessToken && accessToken !== COOKIE_AUTH_SENTINEL) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
   return headers;
 }
 
@@ -51,10 +55,14 @@ function skipRefreshOn401(path: string): boolean {
   return p === "auth/login" || p === "auth/refresh";
 }
 
-/** Prefer explicit token; in browser also use access cookie so callers stay in sync after silent refresh. */
+/** Prefer explicit token; else readable cookie; HttpOnly sessions use credentials only. */
 function bearerForRequest(explicit?: string | null): string | null {
-  if (explicit) return explicit;
-  if (typeof window !== "undefined") return getAccessToken();
+  if (explicit && explicit !== COOKIE_AUTH_SENTINEL) return explicit;
+  if (explicit === COOKIE_AUTH_SENTINEL) return null;
+  if (typeof window !== "undefined") {
+    const t = getAccessToken();
+    return t || null;
+  }
   return null;
 }
 
@@ -62,19 +70,19 @@ let refreshInFlight: Promise<string | null> | null = null;
 
 /**
  * Refresh tokens via direct fetch (must not use apiPost — avoids 401 recursion).
- * Dispatches `eos-access-token-refreshed` so AuthProvider can update in-memory access token.
+ * New tokens are delivered via Set-Cookie (HttpOnly).
  */
 function refreshAccessTokenSingleFlight(): Promise<string | null> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       try {
-        const rt = getRefreshToken();
-        if (!rt || typeof window === "undefined") return null;
+        if (typeof window === "undefined") return null;
         const url = resolveRequestUrl("auth/refresh");
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: rt }),
+          body: JSON.stringify({}),
+          credentials: "include",
         });
         const json = (await res.json().catch(() => ({}))) as ApiResponse<RefreshResponseData>;
         if (
@@ -83,17 +91,15 @@ function refreshAccessTokenSingleFlight(): Promise<string | null> {
           typeof json !== "object" ||
           !("success" in json) ||
           json.success !== true ||
-          !json.data?.access_token
+          !json.data?.user
         ) {
           clearTokens();
           return null;
         }
-        const d = json.data;
-        setTokens(d.access_token, d.refresh_token ?? rt, d.expires_in);
         window.dispatchEvent(
-          new CustomEvent("eos-access-token-refreshed", { detail: { accessToken: d.access_token } })
+          new CustomEvent("eos-access-token-refreshed", { detail: { accessToken: COOKIE_AUTH_SENTINEL } })
         );
-        return d.access_token;
+        return COOKIE_AUTH_SENTINEL;
       } catch {
         clearTokens();
         return null;
@@ -128,6 +134,7 @@ export async function apiRequest<T>(
     return fetch(url, {
       ...init,
       cache: init.cache ?? "no-store",
+      credentials: typeof window !== "undefined" ? "include" : init.credentials,
       headers: getHeaders(bearer, customHeaders, body),
       body: payload as RequestInit["body"],
     });
@@ -138,8 +145,7 @@ export async function apiRequest<T>(
   if (
     res.status === 401 &&
     !skipRefreshOn401(path) &&
-    typeof window !== "undefined" &&
-    getRefreshToken()
+    typeof window !== "undefined"
   ) {
     const next = await refreshAccessTokenSingleFlight();
     if (next) {

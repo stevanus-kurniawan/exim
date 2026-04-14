@@ -6,6 +6,11 @@ const LEGACY_TO_CURRENT: Record<string, string> = {
   Chemical: "Chemical",
   Checmical: "Chemical",
   Packaging: "Package",
+  /** CSV / informal spellings → same label as `frontEnd` PRODUCT_CLASSIFICATION_OPTIONS */
+  Sparepart: "Spare Parts",
+  "Spare part": "Spare Parts",
+  "Spare parts": "Spare Parts",
+  Spareparts: "Spare Parts",
 };
 
 /** Normalize stored value for API JSON (list/detail). */

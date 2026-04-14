@@ -42,12 +42,18 @@ function forwardRequestHeaders(req: NextRequest): Headers {
   return out;
 }
 
-function forwardResponseHeaders(res: Response): Headers {
+function forwardResponseHeaders(upstream: Response): Headers {
   const out = new Headers();
   const pass = ["content-type", "content-disposition", "cache-control"];
   for (const name of pass) {
-    const v = res.headers.get(name);
+    const v = upstream.headers.get(name);
     if (v) out.set(name, v);
+  }
+  const getSetCookie = (upstream.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.();
+  if (getSetCookie?.length) {
+    for (const c of getSetCookie) {
+      out.append("set-cookie", c);
+    }
   }
   return out;
 }
@@ -64,19 +70,24 @@ async function proxy(req: NextRequest, pathSegments: string[]): Promise<NextResp
 
   const method = req.method;
   const headers = forwardRequestHeaders(req);
-  let body: ArrayBuffer | undefined;
+
+  const init: RequestInit = {
+    method,
+    headers,
+    cache: "no-store",
+  };
+
   if (method !== "GET" && method !== "HEAD") {
-    body = await req.arrayBuffer();
+    const body = req.body;
+    if (body) {
+      init.body = body;
+      (init as RequestInit & { duplex?: string }).duplex = "half";
+    }
   }
 
   let upstream: Response;
   try {
-    upstream = await fetch(target, {
-      method,
-      headers,
-      body: body?.byteLength ? body : undefined,
-      cache: "no-store",
-    });
+    upstream = await fetch(target, init);
   } catch {
     return NextResponse.json(
       { success: false, message: "Could not reach backend (BACKEND_INTERNAL_URL)." },

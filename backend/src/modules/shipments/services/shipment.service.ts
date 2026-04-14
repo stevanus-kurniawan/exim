@@ -2,6 +2,7 @@
  * Shipment service: business logic. Create, monitor lifecycle, summary; couple/decouple PO.
  */
 
+import { createHash } from "node:crypto";
 import { ShipmentRepository } from "../repositories/shipment.repository.js";
 import { ShipmentPoMappingRepository } from "../repositories/shipment-po-mapping.repository.js";
 import { ShipmentPoLineReceivedRepository } from "../repositories/shipment-po-line-received.repository.js";
@@ -51,109 +52,30 @@ import { syncPoIntakeStatus } from "../../po-intake/services/po-intake-status-sy
 import { normalizeProductClassificationForApi } from "../../../shared/product-classification.js";
 import { isPibTypeBc23 } from "../../../shared/pib-type.js";
 import { isAtOrPastCustomsClearance } from "../utils/shipment-status-requirements.js";
+import { buildShipmentCsvImportSummary } from "../../../shared/csv-import-summary.js";
+import {
+  SHIPMENT_CSV_ALIASES,
+  SHIPMENT_CSV_CANONICAL_FIELDS,
+  SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL,
+  SHIPMENT_CSV_TEMPLATE_HEADER_ORDER,
+} from "../../../shared/csv-import-aliases.js";
+import {
+  csvCell,
+  detectCsvDelimiter,
+  isUuidString,
+  parseCsvLine,
+  parseInternationalNumber,
+  resolveCsvColumnIndices,
+  splitCsvTextToDataLines,
+  stripBom,
+} from "../../../shared/csv-import-utils.js";
+import { SHIPMENT_CSV_TEMPLATE_HINT_LINES } from "../../../shared/shipment-csv-template-hints.js";
 
 const poIntakeRepo = new PoIntakeRepository();
-
-const SHIPMENT_COMBINED_CSV_HEADERS = [
-  "shipment_no",
-  "po_number",
-  "line_number",
-  "received_qty",
-  "vendor_name",
-  "forwarder_name",
-  "pt",
-  "plant",
-  "incoterm",
-  "shipment_method",
-  "origin_port_name",
-  "origin_port_country",
-  "destination_port_name",
-  "destination_port_country",
-  "etd",
-  "eta",
-  "atd",
-  "ata",
-  "product_classification",
-  "pib_type",
-  "no_request_pib",
-  "nopen",
-  "nopen_date",
-  "bl_awb",
-  "insurance_no",
-  "coo",
-  "cbm",
-  "incoterm_amount",
-  "net_weight_mt",
-  "gross_weight_mt",
-  "total_po_amount",
-  "bm_percentage",
-  "ppn_percentage",
-  "pph_percentage",
-  "delivered_at",
-  "currency",
-  "invoice_no",
-  "currency_rate",
-  "remarks",
-] as const;
-
-function parseCsvLine(line: string, delimiter: "," | ";"): string[] {
-  const result: string[] = [];
-  let cur = "";
-  let inQuote = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    if (c === '"') {
-      inQuote = !inQuote;
-      continue;
-    }
-    if (!inQuote && c === delimiter) {
-      result.push(cur.trim());
-      cur = "";
-      continue;
-    }
-    cur += c;
-  }
-  result.push(cur.trim());
-  return result;
-}
-
-/** Prefer semicolon when Excel (EU/ID locale) exports CSV; otherwise comma. */
-function detectCsvDelimiter(headerLine: string): "," | ";" {
-  const commaCols = parseCsvLine(headerLine, ",").length;
-  const semiCols = parseCsvLine(headerLine, ";").length;
-  if (semiCols > commaCols) return ";";
-  return ",";
-}
-
-function stripBom(s: string): string {
-  return s.replace(/^\uFEFF/, "");
-}
 
 function parseOptionalNumber(text: string): number | undefined {
   const t = text.trim();
   if (!t) return undefined;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-/** Parses numbers from Excel/locale exports: thousands commas, EU-style dots, scientific notation. */
-function parseInternationalNumber(text: string): number | undefined {
-  let t = text.trim();
-  if (!t) return undefined;
-  if (/e/i.test(t)) {
-    t = t.replace(/,/g, ".");
-    const n = Number(t);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  const lastComma = t.lastIndexOf(",");
-  const lastDot = t.lastIndexOf(".");
-  if (lastComma > lastDot) {
-    t = t.replace(/\./g, "").replace(",", ".");
-  } else {
-    const dotParts = t.split(".");
-    if (dotParts.length > 2) t = t.replace(/\./g, "");
-    else t = t.replace(/,/g, "");
-  }
   const n = Number(t);
   return Number.isFinite(n) ? n : undefined;
 }
@@ -197,6 +119,27 @@ function buildRemarksWithTotalPo(base: string | undefined, totalPoRaw: string): 
   return `${baseTrim} | ${suffix}`;
 }
 
+/** Groups CSV rows into one new shipment when Shipment number is omitted: same hash ⇒ same shipment. */
+function stableShipmentFieldsSignature(dto: UpdateShipmentDto): string {
+  const keys = (Object.keys(dto) as (keyof UpdateShipmentDto)[])
+    .filter((k) => {
+      const v = dto[k];
+      if (v === undefined || v === null) return false;
+      if (typeof v === "string" && v.trim() === "") return false;
+      return true;
+    })
+    .sort();
+  const obj: Record<string, unknown> = {};
+  for (const k of keys) obj[String(k)] = dto[k];
+  return createHash("sha256").update(JSON.stringify(obj)).digest("hex");
+}
+
+/** CSV import must not set `closed_at` (Delivered at) before coupling POs — `couplePo` rejects closed shipments. */
+function withoutClosedAtForCsvCoupling(sf: UpdateShipmentDto): UpdateShipmentDto {
+  const { closed_at: _omit, ...rest } = sf;
+  return rest;
+}
+
 function combinedRowToCreateDto(sf: UpdateShipmentDto): CreateShipmentDto {
   return {
     vendor_name: sf.vendor_name,
@@ -222,6 +165,19 @@ function combinedRowToCreateDto(sf: UpdateShipmentDto): CreateShipmentDto {
     cbm: sf.cbm,
     product_classification: sf.product_classification ?? undefined,
   };
+}
+
+/** When CSV omits supplier / incoterm, use linked PO intake (same as PO screen). */
+function applyPoIntakeDefaultsToShipmentDto(dto: UpdateShipmentDto, intake: PoIntakeRow): UpdateShipmentDto {
+  const out: UpdateShipmentDto = { ...dto };
+  const blank = (s: string | undefined) => s == null || String(s).trim() === "";
+  if (blank(out.vendor_name)) {
+    out.vendor_name = intake.supplier_name?.trim() || undefined;
+  }
+  if (blank(out.incoterm)) {
+    out.incoterm = intake.incoterm_location?.trim() || undefined;
+  }
+  return out;
 }
 
 function collectUpdateShipmentFieldKeys(dto: UpdateShipmentDto): string[] {
@@ -518,40 +474,62 @@ export class ShipmentService {
   }
 
   getCombinedImportTemplateCsv(): string {
-    return `${SHIPMENT_COMBINED_CSV_HEADERS.join(",")}
-SHP-TRIAL-0001,PO-0001,1,100,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shanghai,China,Tanjung Priok,Indonesia,2026-04-02,2026-04-10,,,HS3208,Lartas,PIB-REQ-001,NOP-001,2026-04-05,BL123456,INS-001,ID,12.5,500,1.2,1.5,125000000,10,11,2.5,,IDR,INV-001,16250,Trial import
-SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shanghai,China,Tanjung Priok,Indonesia,2026-04-02,2026-04-10,,,HS3208,Lartas,PIB-REQ-001,NOP-001,2026-04-05,BL123456,INS-001,ID,12.5,500,1.2,1.5,125000000,10,11,2.5,,IDR,INV-002,16250,Trial import
-`;
+    const header = SHIPMENT_CSV_TEMPLATE_HEADER_ORDER.join(",");
+    const row1 =
+      "PO-0001,1,100,10,11,2.5,DHL,SEA,Shanghai,China,Tanjung Priok,Indonesia,2026-04-02,2026-04-10,,,Chemical,BC 2.0,PIB-REQ-001,NOP-001,2026-04-05,BL123456,INS-001,ID,12.5,500,1.2,1.5,125000000,10000000,1100000,500000,11600000,,INV-001,16250,Trial import";
+    const row2 =
+      "PO-0002,1,50,10,11,2.5,DHL,SEA,Shanghai,China,Tanjung Priok,Indonesia,2026-04-02,2026-04-10,,,Spare Parts,Lartas,PIB-REQ-001,NOP-001,2026-04-05,BL123456,INS-001,ID,12.5,500,1.2,1.5,125000000,10000000,1100000,500000,11600000,,INV-002,16250,Trial import";
+    const hints = SHIPMENT_CSV_TEMPLATE_HINT_LINES.join("\n");
+    return `${header}\n${row1}\n${row2}\n${hints}\n`;
   }
 
-  async importCombinedFromCsv(csvText: string): Promise<ShipmentCsvImportResult> {
-    const lines = csvText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+  async importCombinedFromCsv(
+    csvText: string,
+    actorName: string,
+    fileName: string | null
+  ): Promise<ShipmentCsvImportResult> {
+    const lines = splitCsvTextToDataLines(csvText);
     if (lines.length < 2) throw new AppError("CSV must include a header row and at least one data row", 400);
 
     const delim = detectCsvDelimiter(stripBom(lines[0]!));
-    const header = parseCsvLine(stripBom(lines[0]!), delim).map((h) => h.trim().toLowerCase());
-    const missingHeaders = SHIPMENT_COMBINED_CSV_HEADERS.filter((h) => !header.includes(h));
-    if (missingHeaders.length > 0) {
+    const headerCells = parseCsvLine(stripBom(lines[0]!), delim);
+    const { indices, ambiguous } = resolveCsvColumnIndices(headerCells, SHIPMENT_CSV_CANONICAL_FIELDS, SHIPMENT_CSV_ALIASES);
+    if (ambiguous.length > 0) {
+      throw new AppError(`Ambiguous CSV column(s): ${[...new Set(ambiguous)].join(", ")}`, 400);
+    }
+    const requiredCore = ["line_number", "delivered_qty"] as const;
+    const missingCore = requiredCore.filter((k) => indices[k] === undefined);
+    const detailLabel = (k: string) => SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL[k] ?? k;
+    if (missingCore.length > 0) {
       throw new AppError(
-        `Missing required CSV header(s): ${missingHeaders.join(", ")}. ` +
-          `Use the exact column names (see template). Files from Excel often use ";" instead of "," between columns — that is supported automatically.`,
+        `Missing required CSV column(s): ${missingCore.map(detailLabel).join(", ")}. ` +
+          `Headers should match the shipment detail screen (see downloadable template). ` +
+          `Excel often uses ";" between columns — that is detected automatically.`,
         400
       );
     }
-    const idx = (k: (typeof SHIPMENT_COMBINED_CSV_HEADERS)[number]) => header.indexOf(k);
+    if (indices.po_number === undefined && indices.intake_id === undefined) {
+      throw new AppError(
+        `Missing PO link column: include "${detailLabel("po_number")}" and/or "${detailLabel("intake_id")}".`,
+        400
+      );
+    }
+
+    const idx = (k: string) => indices[k] ?? -1;
 
     const errors: ShipmentCsvImportErrorRow[] = [];
     const byShipment = new Map<
       string,
       Array<{
         row: number;
-        shipment_no: string;
+        /** Shipment group id or legacy shipment_no — shown in error reports. */
+        group_label: string;
+        is_legacy_shipment_no: boolean;
+        legacy_shipment_no?: string;
         po_number: string;
+        intake_id_raw?: string;
         line_number: number;
-        received_qty: number;
+        delivered_qty: number;
         invoice_no?: string;
         currency_rate?: number;
         currency?: string;
@@ -568,50 +546,80 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
     for (let i = 1; i < lines.length; i++) {
       const row = i + 1;
       const cells = parseCsvLine(lines[i]!, delim);
-      const shipmentNo = (cells[idx("shipment_no")] ?? "").trim();
-      const poNumber = (cells[idx("po_number")] ?? "").trim();
-      if (!shipmentNo && !poNumber) {
+      const shipmentNoLegacy = csvCell(cells, idx("shipment_no")).trim();
+      const poNumber = csvCell(cells, idx("po_number")).trim();
+      const intakeRaw = csvCell(cells, idx("intake_id")).trim();
+      const poRefLabel = poNumber || intakeRaw;
+      const groupLabel = shipmentNoLegacy || "—";
+
+      if (!shipmentNoLegacy && !poNumber && !intakeRaw) {
         const anyValue = cells.some((c) => c.trim().length > 0);
         if (!anyValue) {
           skippedEmptyBodyRows += 1;
           continue;
         }
       }
-      const lineNoParsed = parseInternationalNumber((cells[idx("line_number")] ?? "").trim());
+      const lineNoParsed = parseInternationalNumber(csvCell(cells, idx("line_number")).trim());
       const lineNoRaw = lineNoParsed != null && Number.isInteger(lineNoParsed) ? lineNoParsed : NaN;
-      const recvRaw = parseInternationalNumber((cells[idx("received_qty")] ?? "").trim()) ?? NaN;
-      if (!shipmentNo) errors.push({ row, field: "shipment_no", shipment_no: "", po_number: poNumber, message: "shipment_no is required" });
-      if (!poNumber) errors.push({ row, field: "po_number", shipment_no: shipmentNo, po_number: "", message: "po_number is required" });
+      const deliverRaw = parseInternationalNumber(csvCell(cells, idx("delivered_qty")).trim()) ?? NaN;
+      if (!poNumber && !intakeRaw) {
+        errors.push({
+          row,
+          field: "po_number",
+          shipment_no: groupLabel,
+          po_number: "",
+          message: `Either ${SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.po_number} or ${SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.intake_id} is required`,
+        });
+      }
       if (!Number.isInteger(lineNoRaw) || lineNoRaw < 1) {
-        errors.push({ row, field: "line_number", shipment_no: shipmentNo, po_number: poNumber, message: "line_number must be an integer >= 1" });
+        errors.push({ row, field: "line_number", shipment_no: groupLabel, po_number: poRefLabel, message: "line_number must be an integer >= 1" });
       }
-      if (!Number.isFinite(recvRaw) || recvRaw < 0) {
-        errors.push({ row, field: "received_qty", shipment_no: shipmentNo, po_number: poNumber, message: "received_qty must be a non-negative number" });
+      if (!Number.isFinite(deliverRaw) || deliverRaw < 0) {
+        errors.push({
+          row,
+          field: "delivered_qty",
+          shipment_no: groupLabel,
+          po_number: poRefLabel,
+          message: `${SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.delivered_qty} must be a non-negative number`,
+        });
       }
-      const crText = (cells[idx("currency_rate")] ?? "").trim();
+      const crText = csvCell(cells, idx("currency_rate")).trim();
       const currencyRate = crText ? parseInternationalNumber(crText) : undefined;
       if (crText && (currencyRate == null || currencyRate <= 0)) {
-        errors.push({ row, field: "currency_rate", shipment_no: shipmentNo, po_number: poNumber, message: "currency_rate must be a positive number" });
+        errors.push({
+          row,
+          field: "currency_rate",
+          shipment_no: groupLabel,
+          po_number: poRefLabel,
+          message: "currency_rate must be a positive number",
+        });
       }
-      if (!shipmentNo || !poNumber || !Number.isInteger(lineNoRaw) || lineNoRaw < 1 || !Number.isFinite(recvRaw) || recvRaw < 0) continue;
+      if (
+        (!poNumber && !intakeRaw) ||
+        !Number.isInteger(lineNoRaw) ||
+        lineNoRaw < 1 ||
+        !Number.isFinite(deliverRaw) ||
+        deliverRaw < 0
+      )
+        continue;
 
       let rowFieldErrors = false;
-      const optDate = (key: (typeof SHIPMENT_COMBINED_CSV_HEADERS)[number], fieldLabel: string): string | undefined => {
-        const v = (cells[idx(key)] ?? "").trim();
+      const optDate = (key: string, fieldLabel: string): string | undefined => {
+        const v = csvCell(cells, idx(key)).trim();
         if (!v) return undefined;
         if (!isValidDateString(v)) {
-          errors.push({ row, field: key, shipment_no: shipmentNo, po_number: poNumber, message: `${fieldLabel} must be a valid date` });
+          errors.push({ row, field: key, shipment_no: groupLabel, po_number: poRefLabel, message: `${fieldLabel} must be a valid date` });
           rowFieldErrors = true;
           return undefined;
         }
         return normalizeCsvDateToApi(v);
       };
-      const optNonNeg = (key: (typeof SHIPMENT_COMBINED_CSV_HEADERS)[number], label: string): number | undefined => {
-        const t = (cells[idx(key)] ?? "").trim();
+      const optNonNeg = (key: string, label: string): number | undefined => {
+        const t = csvCell(cells, idx(key)).trim();
         if (!t) return undefined;
         const n = parseInternationalNumber(t);
         if (n == null || n < 0) {
-          errors.push({ row, field: key, shipment_no: shipmentNo, po_number: poNumber, message: `${label} must be a non-negative number` });
+          errors.push({ row, field: key, shipment_no: groupLabel, po_number: poRefLabel, message: `${label} must be a non-negative number` });
           rowFieldErrors = true;
           return undefined;
         }
@@ -627,8 +635,8 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           errors.push({
             row,
             field: "eta",
-            shipment_no: shipmentNo,
-            po_number: poNumber,
+            shipment_no: groupLabel,
+            po_number: poRefLabel,
             message: "eta must be after etd",
           });
           rowFieldErrors = true;
@@ -639,26 +647,32 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
       const nopen_date = optDate("nopen_date", "nopen_date");
       const delivered_at = optDate("delivered_at", "delivered_at");
 
-      const bmText = (cells[idx("bm_percentage")] ?? "").trim();
+      const bmPctText = csvCell(cells, idx("bm_percentage")).trim();
       let bm_percentage: number | undefined;
-      if (bmText) {
-        const n = parseInternationalNumber(bmText);
+      if (bmPctText) {
+        const n = parseInternationalNumber(bmPctText);
         if (n == null || n < 0 || n > 100) {
-          errors.push({ row, field: "bm_percentage", shipment_no: shipmentNo, po_number: poNumber, message: "bm_percentage must be between 0 and 100" });
+          errors.push({
+            row,
+            field: "bm_percentage",
+            shipment_no: groupLabel,
+            po_number: poRefLabel,
+            message: "bm_percentage must be between 0 and 100",
+          });
           rowFieldErrors = true;
         } else bm_percentage = n;
       }
 
       const pct0to100 = (headerKey: "ppn_percentage" | "pph_percentage", fieldLabel: string): number | undefined => {
-        const t = (cells[idx(headerKey)] ?? "").trim();
+        const t = csvCell(cells, idx(headerKey)).trim();
         if (!t) return undefined;
         const n = parseInternationalNumber(t);
         if (n == null || n < 0 || n > 100) {
           errors.push({
             row,
             field: headerKey,
-            shipment_no: shipmentNo,
-            po_number: poNumber,
+            shipment_no: groupLabel,
+            po_number: poRefLabel,
             message: `${fieldLabel} must be between 0 and 100`,
           });
           rowFieldErrors = true;
@@ -669,89 +683,286 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
       const ppn_percentage = pct0to100("ppn_percentage", "ppn_percentage");
       const pph_percentage = pct0to100("pph_percentage", "pph_percentage");
 
+      const optIdrDutyTotal = (
+        canonical: "bm" | "ppn_amount" | "pph_amount" | "pdri",
+        detailLabel: string
+      ): number | undefined => {
+        const t = csvCell(cells, idx(canonical)).trim();
+        if (!t) return undefined;
+        const n = parseInternationalNumber(t);
+        if (n == null || n < 0) {
+          errors.push({
+            row,
+            field: canonical,
+            shipment_no: groupLabel,
+            po_number: poRefLabel,
+            message: `${detailLabel} must be a non-negative number`,
+          });
+          rowFieldErrors = true;
+          return undefined;
+        }
+        return n;
+      };
+
+      const bmTotal = optIdrDutyTotal("bm", SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.bm);
+      const ppnTotal = optIdrDutyTotal("ppn_amount", SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.ppn_amount);
+      const pphTotal = optIdrDutyTotal("pph_amount", SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.pph_amount);
+      const pdriDeclared = optIdrDutyTotal("pdri", SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.pdri);
+
+      if (
+        pdriDeclared != null &&
+        bmTotal !== undefined &&
+        ppnTotal !== undefined &&
+        pphTotal !== undefined &&
+        Math.abs(bmTotal + ppnTotal + pphTotal - pdriDeclared) > 0.01
+      ) {
+        errors.push({
+          row,
+          field: "pdri",
+          shipment_no: groupLabel,
+          po_number: poRefLabel,
+          message: "PDRI (total) must equal BM (total) + PPN (total) + PPH (total)",
+        });
+        rowFieldErrors = true;
+      }
+
       const cbm = optNonNeg("cbm", "cbm");
       const incoterm_amount = optNonNeg("incoterm_amount", "incoterm_amount (Service & Charge)");
       const net_weight_mt = optNonNeg("net_weight_mt", "net_weight_mt");
       const gross_weight_mt = optNonNeg("gross_weight_mt", "gross_weight_mt");
 
-      const remarksBase = (cells[idx("remarks")] ?? "").trim() || undefined;
-      const totalPoRaw = cells[idx("total_po_amount")] ?? "";
+      const remarksBase = csvCell(cells, idx("remarks")).trim() || undefined;
+      const totalPoRaw = csvCell(cells, idx("total_po_amount"));
       const remarks = buildRemarksWithTotalPo(remarksBase, totalPoRaw);
 
       const dto: UpdateShipmentDto = {
-        vendor_name: (cells[idx("vendor_name")] ?? "").trim() || undefined,
-        forwarder_name: (cells[idx("forwarder_name")] ?? "").trim() || undefined,
-        incoterm: (cells[idx("incoterm")] ?? "").trim() || undefined,
-        shipment_method: (cells[idx("shipment_method")] ?? "").trim() || undefined,
-        origin_port_name: (cells[idx("origin_port_name")] ?? "").trim() || undefined,
-        origin_port_country: (cells[idx("origin_port_country")] ?? "").trim() || undefined,
-        destination_port_name: (cells[idx("destination_port_name")] ?? "").trim() || undefined,
-        destination_port_country: (cells[idx("destination_port_country")] ?? "").trim() || undefined,
+        vendor_name: csvCell(cells, idx("vendor_name")).trim() || undefined,
+        forwarder_name: csvCell(cells, idx("forwarder_name")).trim() || undefined,
+        incoterm: csvCell(cells, idx("incoterm")).trim() || undefined,
+        shipment_method: csvCell(cells, idx("shipment_method")).trim() || undefined,
+        origin_port_name: csvCell(cells, idx("origin_port_name")).trim() || undefined,
+        origin_port_country: csvCell(cells, idx("origin_port_country")).trim() || undefined,
+        destination_port_name: csvCell(cells, idx("destination_port_name")).trim() || undefined,
+        destination_port_country: csvCell(cells, idx("destination_port_country")).trim() || undefined,
         etd,
         eta,
         atd,
         ata,
-        product_classification: (cells[idx("product_classification")] ?? "").trim() || undefined,
-        pib_type: (cells[idx("pib_type")] ?? "").trim() || undefined,
-        no_request_pib: (cells[idx("no_request_pib")] ?? "").trim() || undefined,
-        nopen: (cells[idx("nopen")] ?? "").trim() || undefined,
+        product_classification: csvCell(cells, idx("product_classification")).trim() || undefined,
+        pib_type: csvCell(cells, idx("pib_type")).trim() || undefined,
+        no_request_pib: csvCell(cells, idx("no_request_pib")).trim() || undefined,
+        nopen: csvCell(cells, idx("nopen")).trim() || undefined,
         nopen_date,
-        bl_awb: (cells[idx("bl_awb")] ?? "").trim() || undefined,
-        insurance_no: (cells[idx("insurance_no")] ?? "").trim() || undefined,
-        coo: (cells[idx("coo")] ?? "").trim() || undefined,
+        bl_awb: csvCell(cells, idx("bl_awb")).trim() || undefined,
+        insurance_no: csvCell(cells, idx("insurance_no")).trim() || undefined,
+        coo: csvCell(cells, idx("coo")).trim() || undefined,
         cbm,
         incoterm_amount,
         net_weight_mt,
         gross_weight_mt,
         closed_at: delivered_at,
         remarks,
+        ...(bmTotal !== undefined ? { bm: bmTotal } : {}),
+        ...(ppnTotal !== undefined ? { ppn_amount: ppnTotal } : {}),
+        ...(pphTotal !== undefined ? { pph_amount: pphTotal } : {}),
       };
       if (rowFieldErrors) continue;
-      const arr = byShipment.get(shipmentNo) ?? [];
+      const groupStorageKey = shipmentNoLegacy
+        ? `L:${shipmentNoLegacy}`
+        : `S:${stableShipmentFieldsSignature(dto)}`;
+      const arr = byShipment.get(groupStorageKey) ?? [];
       arr.push({
         row,
-        shipment_no: shipmentNo,
+        group_label: groupLabel,
+        is_legacy_shipment_no: Boolean(shipmentNoLegacy),
+        legacy_shipment_no: shipmentNoLegacy || undefined,
         po_number: poNumber,
+        intake_id_raw: intakeRaw || undefined,
         line_number: lineNoRaw,
-        received_qty: recvRaw,
-        invoice_no: (cells[idx("invoice_no")] ?? "").trim() || undefined,
+        delivered_qty: deliverRaw,
+        invoice_no: csvCell(cells, idx("invoice_no")).trim() || undefined,
         currency_rate: currencyRate,
-        currency: (cells[idx("currency")] ?? "").trim() || undefined,
-        pt: (cells[idx("pt")] ?? "").trim() || undefined,
-        plant: (cells[idx("plant")] ?? "").trim() || undefined,
+        currency: csvCell(cells, idx("currency")).trim() || undefined,
+        pt: csvCell(cells, idx("pt")).trim() || undefined,
+        plant: csvCell(cells, idx("plant")).trim() || undefined,
         shipment_fields: dto,
         bm_percentage: bm_percentage ?? null,
         ppn_percentage: ppn_percentage ?? null,
         pph_percentage: pph_percentage ?? null,
       });
-      byShipment.set(shipmentNo, arr);
+      byShipment.set(groupStorageKey, arr);
     }
 
     let importedShipments = 0;
     let importedRows = 0;
-    for (const [shipmentNo, rows] of byShipment) {
-      const first = rows[0]!;
-      const inconsistent = rows.some((r) => JSON.stringify(r.shipment_fields) !== JSON.stringify(first.shipment_fields));
+    for (const [, rows] of byShipment) {
+      type CsvShipmentRow = (typeof rows)[number];
+
+      const resolveIntakeForRow = async (r: CsvShipmentRow): Promise<PoIntakeRow | null> => {
+        if (r.intake_id_raw) {
+          const idTrim = r.intake_id_raw.trim();
+          if (!isUuidString(idTrim)) {
+            errors.push({
+              row: r.row,
+              field: "intake_id",
+              shipment_no: r.group_label,
+              po_number: idTrim,
+              message: "intake_id must be a valid UUID",
+            });
+            return null;
+          }
+          const intake = await poIntakeRepo.findById(idTrim);
+          if (!intake) {
+            errors.push({
+              row: r.row,
+              field: "intake_id",
+              shipment_no: r.group_label,
+              po_number: idTrim,
+              message: "PO intake not found for intake_id",
+            });
+            return null;
+          }
+          return intake;
+        }
+        const resolvedId = await poIntakeRepo.findIdByPoNumberTrimmed(r.po_number);
+        if (!resolvedId) {
+          errors.push({
+            row: r.row,
+            field: "po_number",
+            shipment_no: r.group_label,
+            po_number: r.po_number,
+            message: "PO not found in system",
+          });
+          return null;
+        }
+        const intake = await poIntakeRepo.findById(resolvedId);
+        if (!intake) {
+          errors.push({
+            row: r.row,
+            field: "po_number",
+            shipment_no: r.group_label,
+            po_number: r.po_number,
+            message: "PO not found in system",
+          });
+          return null;
+        }
+        return intake;
+      };
+
+      const mergedRows: Array<CsvShipmentRow & { intake: PoIntakeRow; shipment_fields: UpdateShipmentDto }> = [];
+      let resolveFailed = false;
+      for (const r of rows) {
+        const intake = await resolveIntakeForRow(r);
+        if (!intake) {
+          resolveFailed = true;
+          continue;
+        }
+        mergedRows.push({
+          ...r,
+          intake,
+          shipment_fields: applyPoIntakeDefaultsToShipmentDto(r.shipment_fields, intake),
+          currency: r.currency?.trim() || intake.currency?.trim() || undefined,
+        });
+      }
+      if (resolveFailed) continue;
+
+      const firstRowForInv = mergedRows[0]!;
+      const firstInv = firstRowForInv.invoice_no?.trim() ?? "";
+      const firstCr = firstRowForInv.currency_rate;
+      let invoiceRateMismatch = false;
+      for (const r of mergedRows.slice(1)) {
+        const inv = r.invoice_no?.trim() ?? "";
+        if (inv) {
+          if (!firstInv) {
+            errors.push({
+              row: r.row,
+              field: "invoice_no",
+              shipment_no: r.group_label,
+              po_number: r.po_number,
+              message:
+                "Invoice no. is shipment-level: enter it on the first data row of this shipment group, or leave blank on all rows.",
+            });
+            invoiceRateMismatch = true;
+          } else if (inv !== firstInv) {
+            errors.push({
+              row: r.row,
+              field: "invoice_no",
+              shipment_no: r.group_label,
+              po_number: r.po_number,
+              message: "Invoice no. must match the first row of this shipment (or leave blank on additional rows).",
+            });
+            invoiceRateMismatch = true;
+          }
+        }
+        const cr = r.currency_rate;
+        if (cr != null) {
+          if (firstCr == null) {
+            errors.push({
+              row: r.row,
+              field: "currency_rate",
+              shipment_no: r.group_label,
+              po_number: r.po_number,
+              message:
+                "Currency rate is shipment-level: enter it on the first data row of this shipment group, or leave blank on all rows.",
+            });
+            invoiceRateMismatch = true;
+          } else if (Math.abs(cr - firstCr) > 1e-9) {
+            errors.push({
+              row: r.row,
+              field: "currency_rate",
+              shipment_no: r.group_label,
+              po_number: r.po_number,
+              message: "Currency rate must match the first row of this shipment (or leave blank on additional rows).",
+            });
+            invoiceRateMismatch = true;
+          }
+        }
+      }
+      if (invoiceRateMismatch) continue;
+
+      const firstM = mergedRows[0]!;
+      const inconsistent = mergedRows.some(
+        (r) => JSON.stringify(r.shipment_fields) !== JSON.stringify(firstM.shipment_fields)
+      );
       if (inconsistent) {
+        const groupHint = firstM.is_legacy_shipment_no
+          ? SHIPMENT_CSV_CANONICAL_TO_DETAIL_LABEL.shipment_no
+          : "shipment-level column values (including values filled from PO when omitted in CSV)";
         for (const r of rows) {
           errors.push({
             row: r.row,
-            field: "shipment_group",
-            shipment_no: r.shipment_no,
+            field: "shipment",
+            shipment_no: r.group_label,
             po_number: r.po_number,
-            message: "Rows with the same shipment_no must share identical shipment fields",
+            message: `Rows targeting the same shipment (${groupHint}) must share identical shipment fields`,
           });
         }
         continue;
       }
 
       let shipmentId: string;
-      const existing = await this.repo.findByShipmentNo(shipmentNo);
-      if (existing) {
-        shipmentId = existing.id;
-        await this.update(existing.id, first.shipment_fields);
+
+      if (firstM.is_legacy_shipment_no && firstM.legacy_shipment_no) {
+        const legacyNo = firstM.legacy_shipment_no;
+        const existing = await this.repo.findByShipmentNo(legacyNo);
+        if (existing) {
+          shipmentId = existing.id;
+          await this.update(existing.id, withoutClosedAtForCsvCoupling(firstM.shipment_fields));
+        } else {
+          const created = await this.repo.create(combinedRowToCreateDto(firstM.shipment_fields), legacyNo);
+          shipmentId = created.id;
+          await this.statusHistoryRepo.create({
+            shipmentId,
+            previousStatus: null,
+            newStatus: "INITIATE_SHIPPING_DOCUMENT",
+            remarks: null,
+            changedBy: "CSV import",
+          });
+          await this.update(shipmentId, withoutClosedAtForCsvCoupling(firstM.shipment_fields));
+        }
       } else {
-        const created = await this.repo.create(combinedRowToCreateDto(first.shipment_fields), shipmentNo);
+        const newShipmentNo = await this.repo.getNextShipmentNo(new Date().getFullYear());
+        const created = await this.repo.create(combinedRowToCreateDto(firstM.shipment_fields), newShipmentNo);
         shipmentId = created.id;
         await this.statusHistoryRepo.create({
           shipmentId,
@@ -760,7 +971,7 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           remarks: null,
           changedBy: "CSV import",
         });
-        await this.update(shipmentId, first.shipment_fields);
+        await this.update(shipmentId, withoutClosedAtForCsvCoupling(firstM.shipment_fields));
       }
 
       const byIntake = new Map<
@@ -770,33 +981,23 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           po_number: string;
           item_id: string;
           received_qty: number;
-          invoice_no?: string;
-          currency_rate?: number;
           bm_percentage?: number | null;
           ppn_percentage?: number | null;
           pph_percentage?: number | null;
         }>
       >();
       let hasGroupError = false;
-      for (const r of rows) {
-        const intakeId = await poIntakeRepo.findIdByPoNumberTrimmed(r.po_number);
-        if (!intakeId) {
-          errors.push({ row: r.row, field: "po_number", shipment_no: r.shipment_no, po_number: r.po_number, message: "PO not found in system" });
-          hasGroupError = true;
-          continue;
-        }
-        const intake = await poIntakeRepo.findById(intakeId);
-        if (!intake) {
-          errors.push({ row: r.row, field: "po_number", shipment_no: r.shipment_no, po_number: r.po_number, message: "PO not found in system" });
-          hasGroupError = true;
-          continue;
-        }
+      for (const r of mergedRows) {
+        const intake = r.intake;
+        const intakeId = intake.id;
+        const poLabel = r.po_number || intake.po_number;
+
         if (r.currency && normalizeGroupField(r.currency) !== normalizeGroupField(intake.currency)) {
           errors.push({
             row: r.row,
             field: "currency",
-            shipment_no: r.shipment_no,
-            po_number: r.po_number,
+            shipment_no: r.group_label,
+            po_number: poLabel,
             message: `currency must match PO in system (${intake.currency ?? "—"})`,
           });
           hasGroupError = true;
@@ -806,8 +1007,8 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           errors.push({
             row: r.row,
             field: "pt",
-            shipment_no: r.shipment_no,
-            po_number: r.po_number,
+            shipment_no: r.group_label,
+            po_number: poLabel,
             message: `pt must match PO in system (${intake.pt ?? "—"})`,
           });
           hasGroupError = true;
@@ -817,8 +1018,8 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           errors.push({
             row: r.row,
             field: "plant",
-            shipment_no: r.shipment_no,
-            po_number: r.po_number,
+            shipment_no: r.group_label,
+            po_number: poLabel,
             message: `plant must match PO in system (${intake.plant ?? "—"})`,
           });
           hasGroupError = true;
@@ -830,8 +1031,8 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           errors.push({
             row: r.row,
             field: "line_number",
-            shipment_no: r.shipment_no,
-            po_number: r.po_number,
+            shipment_no: r.group_label,
+            po_number: poLabel,
             message: `PO line ${r.line_number} not found`,
           });
           hasGroupError = true;
@@ -840,11 +1041,9 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
         const a = byIntake.get(intakeId) ?? [];
         a.push({
           row: r.row,
-          po_number: r.po_number,
+          po_number: poLabel,
           item_id: item.id,
-          received_qty: r.received_qty,
-          invoice_no: r.invoice_no,
-          currency_rate: r.currency_rate,
+          received_qty: r.delivered_qty,
           bm_percentage: r.bm_percentage ?? null,
           ppn_percentage: r.ppn_percentage ?? null,
           pph_percentage: r.pph_percentage ?? null,
@@ -859,11 +1058,10 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
           if (!isCoupled) {
             await this.couplePo(shipmentId, [intakeId], "CSV Import");
           }
-          const firstMap = list[0]!;
-          if (firstMap.invoice_no !== undefined || firstMap.currency_rate !== undefined) {
+          if (firstM.invoice_no !== undefined || firstM.currency_rate !== undefined) {
             await this.updatePoMapping(shipmentId, intakeId, {
-              invoice_no: firstMap.invoice_no ?? null,
-              currency_rate: firstMap.currency_rate ?? null,
+              invoice_no: firstM.invoice_no?.trim() ? firstM.invoice_no.trim() : null,
+              currency_rate: firstM.currency_rate ?? null,
             });
           }
           await this.updatePoLines(
@@ -878,24 +1076,72 @@ SHP-TRIAL-0001,PO-0002,1,50,PT Supplier A,DHL,PT Demo,Plant Merak,FOB,SEA,Shangh
             }))
           );
         }
+        if (firstM.shipment_fields.closed_at !== undefined) {
+          await this.update(shipmentId, { closed_at: firstM.shipment_fields.closed_at });
+        }
         importedShipments += 1;
         importedRows += rows.length;
       } catch (e) {
         const message = e instanceof AppError ? e.message : "Failed to import shipment group";
         for (const r of rows) {
-          errors.push({ row: r.row, field: "shipment_group", shipment_no: r.shipment_no, po_number: r.po_number, message });
+          errors.push({ row: r.row, field: "shipment", shipment_no: r.group_label, po_number: r.po_number, message });
         }
       }
     }
 
     const totalBodyRows = lines.length - 1 - skippedEmptyBodyRows;
-    return {
+    const out: ShipmentCsvImportResult = {
       total_rows: totalBodyRows,
       imported_shipments: importedShipments,
       imported_rows: importedRows,
       failed_rows: totalBodyRows - importedRows,
+      summary: "",
       errors: errors.sort((a, b) => a.row - b.row),
     };
+    out.summary = buildShipmentCsvImportSummary(out);
+
+    const status: "SUCCESS" | "PARTIAL" | "FAILED" =
+      out.imported_rows === 0 ? "FAILED" : out.errors.length > 0 ? "PARTIAL" : "SUCCESS";
+    await this.repo.createShipmentImportHistory({
+      fileName,
+      uploadedBy: actorName,
+      totalRows: out.total_rows,
+      importedShipments: out.imported_shipments,
+      importedRows: out.imported_rows,
+      failedRows: out.failed_rows,
+      status,
+    });
+
+    return out;
+  }
+
+  async listShipmentImportHistory(limit?: number): Promise<
+    Array<{
+      id: string;
+      file_name: string | null;
+      uploaded_by: string;
+      total_rows: number;
+      imported_shipments: number;
+      imported_rows: number;
+      failed_rows: number;
+      status: string;
+      created_at: string;
+      finished_at: string | null;
+    }>
+  > {
+    const rows = await this.repo.listShipmentImportHistory(limit);
+    return rows.map((r) => ({
+      id: r.id,
+      file_name: r.file_name,
+      uploaded_by: r.uploaded_by,
+      total_rows: r.total_rows,
+      imported_shipments: r.imported_shipments,
+      imported_rows: r.imported_rows,
+      failed_rows: r.failed_rows,
+      status: r.status,
+      created_at: r.created_at.toISOString(),
+      finished_at: r.finished_at ? r.finished_at.toISOString() : null,
+    }));
   }
 
   async list(query: ListShipmentsQuery): Promise<{ items: ShipmentListItem[]; total: number }> {

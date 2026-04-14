@@ -14,9 +14,8 @@ import { EmailVerificationTokenRepository } from "../repositories/email-verifica
 import { PasswordResetTokenRepository } from "../repositories/password-reset-token.repository.js";
 import { sendPasswordResetEmail } from "./email.service.js";
 import { AppError } from "../../../middlewares/errorHandler.js";
-import { computeEffectivePermissions, normalizePermissionOverrides } from "../../../shared/rbac.js";
+import { userRowToAuthUser } from "../auth-user-mapper.js";
 import type { AuthUser, LoginResponseData, RefreshResponseData } from "../dto/index.js";
-import type { UserRow } from "../dto/index.js";
 
 const SALT_ROUNDS = 12;
 const RESET_TOKEN_EXPIRY_HOURS = 1;
@@ -34,19 +33,6 @@ function expiresInSeconds(exp: string): number {
   return 3600;
 }
 
-function rowToAuthUser(row: UserRow): AuthUser {
-  const permission_overrides = normalizePermissionOverrides(row.permission_overrides);
-  const effective_permissions = [...computeEffectivePermissions(row.role, permission_overrides)];
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    role: row.role,
-    permission_overrides,
-    effective_permissions,
-  };
-}
-
 export class AuthService {
   constructor(
     private readonly userRepo: UserRepository,
@@ -57,9 +43,8 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<LoginResponseData> {
     const accessSecret = config.jwt.accessSecret;
-    const refreshSecret = config.jwt.refreshSecret;
-    if (!accessSecret || !refreshSecret) {
-      throw new AppError("Auth is not configured (missing JWT secrets)", 500);
+    if (!accessSecret) {
+      throw new AppError("Auth is not configured (missing JWT_ACCESS_SECRET)", 500);
     }
 
     const user = await this.userRepo.findByEmail(email);
@@ -76,7 +61,7 @@ export class AuthService {
       throw new AppError("Please verify your email before signing in", 403);
     }
 
-    const authUser = rowToAuthUser(user);
+    const authUser = userRowToAuthUser(user);
     const accessToken = this.signAccessToken(authUser);
     const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "1h");
 
@@ -101,9 +86,8 @@ export class AuthService {
 
   async refresh(refreshToken: string): Promise<RefreshResponseData> {
     const accessSecret = config.jwt.accessSecret;
-    const refreshSecret = config.jwt.refreshSecret;
-    if (!accessSecret || !refreshSecret) {
-      throw new AppError("Auth is not configured (missing JWT secrets)", 500);
+    if (!accessSecret) {
+      throw new AppError("Auth is not configured (missing JWT_ACCESS_SECRET)", 500);
     }
 
     const row = await this.refreshTokenRepo.findByToken(refreshToken);
@@ -122,7 +106,7 @@ export class AuthService {
       throw new AppError("User not found or inactive", 401);
     }
 
-    const authUser = rowToAuthUser(user);
+    const authUser = userRowToAuthUser(user);
     const accessToken = this.signAccessToken(authUser);
     const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "1h");
 
@@ -151,7 +135,7 @@ export class AuthService {
 
   async getMe(userId: string): Promise<AuthUser | null> {
     const user = await this.userRepo.findById(userId);
-    return user ? rowToAuthUser(user) : null;
+    return user ? userRowToAuthUser(user) : null;
   }
 
   /** Hash password for storage (e.g. seed or user create). Never store plain text. */

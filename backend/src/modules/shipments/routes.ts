@@ -37,6 +37,12 @@ shipmentRoutes.post(
   uploadSingle,
   shipmentController.importCombinedCsv
 );
+shipmentRoutes.get(
+  "/import/history",
+  authMiddleware,
+  requirePermission(PERMISSIONS.IMPORT_PO_CSV),
+  shipmentController.listShipmentImportHistory
+);
 shipmentRoutes.get("/:id", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), shipmentController.getById);
 shipmentRoutes.put("/:id", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), shipmentController.update);
 shipmentRoutes.patch("/:id/close", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), shipmentController.close);

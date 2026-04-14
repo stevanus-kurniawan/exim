@@ -2,6 +2,7 @@
  * Shipment documents: upload to local storage, list, download, delete.
  */
 
+import { stat } from "fs/promises";
 import { v4 as uuidv4 } from "uuid";
 import { AppError } from "../../../middlewares/errorHandler.js";
 import { LocalStorageAdapter } from "../../../shared/storage/local-storage.adapter.js";
@@ -84,7 +85,7 @@ export class ShipmentDocumentService {
     documentType: string,
     status: string | null,
     intakeId: string | null,
-    fileBuffer: Buffer,
+    tempFilePath: string,
     originalName: string,
     mimeType: string | undefined,
     uploadedBy: string
@@ -122,7 +123,8 @@ export class ShipmentDocumentService {
 
     const id = uuidv4();
     const fileName = safeFileName(originalName || "file");
-    const { storageKey } = await this.storage.upload(fileBuffer, {
+    const st = await stat(tempFilePath);
+    const { storageKey } = await this.storage.uploadFromPath(tempFilePath, {
       documentId: shipmentId,
       versionId: id,
       fileName,
@@ -139,7 +141,7 @@ export class ShipmentDocumentService {
       originalFileName: originalName || fileName,
       storageKey,
       mimeType: mimeType ?? null,
-      sizeBytes: fileBuffer.length,
+      sizeBytes: st.size,
       uploadedBy,
     });
 

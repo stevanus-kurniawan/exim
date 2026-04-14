@@ -204,6 +204,8 @@ export interface PoCsvImportResult {
   imported_pos: number;
   imported_rows: number;
   failed_rows: number;
+  /** Short human-readable outcome (counts + common failure reasons). */
+  summary: string;
   errors: PoCsvImportErrorRow[];
 }
 

@@ -16,6 +16,7 @@ import { ShipmentRepository } from "../../shipments/repositories/shipment.reposi
 import { ShipmentPoMappingRepository } from "../../shipments/repositories/shipment-po-mapping.repository.js";
 import { UserRepository } from "../../auth/repositories/user.repository.js";
 import type { ListPoIntakeQuery } from "../dto/index.js";
+import { readMulterFileAsUtf8 } from "../../../utils/read-multer-upload.js";
 
 const repo = new PoIntakeRepository();
 const mappingRepo = new ShipmentPoMappingRepository();
@@ -223,8 +224,8 @@ export async function downloadImportTemplate(req: Request, res: Response, next: 
 export async function importCsv(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     let csvText = "";
-    const file = req.file as { buffer?: Buffer; originalname?: string } | undefined;
-    if (file?.buffer) csvText = file.buffer.toString("utf8");
+    const file = req.file;
+    if (file) csvText = await readMulterFileAsUtf8(file);
     else if (typeof req.body?.csv_text === "string") csvText = req.body.csv_text;
     if (!csvText.trim()) {
       sendError(res, "CSV file is required", { statusCode: 400 });

@@ -16,9 +16,11 @@ import type {
   ShipmentActivityItem,
   ShipmentDocumentListItem,
   ShipmentImportCsvResult,
+  ShipmentImportHistoryItem,
 } from "@/types/shipments";
 import type { ApiResponse } from "@/types/api";
 import { config } from "@/lib/config";
+import { COOKIE_AUTH_SENTINEL } from "@/lib/constants";
 
 function appendMulti(params: URLSearchParams, key: string, values: string[] | undefined) {
   values?.forEach((v) => params.append(key, v));
@@ -375,11 +377,21 @@ export async function importShipmentCombinedCsv(
 export async function downloadShipmentCombinedTemplate(accessToken: string | null): Promise<Blob> {
   const url = `${config.apiBaseUrl}/shipments/import/combined-template-csv`;
   const headers: Record<string, string> = {};
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-  const res = await fetch(url, { method: "GET", headers });
+  if (accessToken && accessToken !== COOKIE_AUTH_SENTINEL) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+  const res = await fetch(url, { method: "GET", headers, credentials: "include" });
   if (!res.ok) throw new Error("Failed to download shipment template");
   return res.blob();
 }
 
+export async function listShipmentImportHistory(
+  accessToken: string | null,
+  limit = 20
+): Promise<ApiResponse<ShipmentImportHistoryItem[]>> {
+  const q = new URLSearchParams();
+  q.set("limit", String(limit));
+  return apiGet<ShipmentImportHistoryItem[]>(`shipments/import/history?${q.toString()}`, accessToken);
+}
 
 

@@ -9,6 +9,7 @@ import type {
   CreateShipmentDto,
   UpdateShipmentDto,
   ListShipmentsQuery,
+  ShipmentImportHistoryRow,
   ShipmentListFilterOptions,
   ShipmentRow,
 } from "../dto/index.js";
@@ -797,6 +798,43 @@ export class ShipmentRepository {
   /** Persist system-calculated BM (not exposed on public update API). */
   async updateComputedBm(id: string, bm: number): Promise<void> {
     await this.pool.query(`UPDATE shipments SET bm = $1, updated_at = NOW() WHERE id = $2`, [bm, id]);
+  }
+
+  async createShipmentImportHistory(input: {
+    fileName: string | null;
+    uploadedBy: string;
+    totalRows: number;
+    importedShipments: number;
+    importedRows: number;
+    failedRows: number;
+    status: "SUCCESS" | "PARTIAL" | "FAILED";
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO shipment_import_history
+       (file_name, uploaded_by, total_rows, imported_shipments, imported_rows, failed_rows, status, created_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+      [
+        input.fileName,
+        input.uploadedBy,
+        input.totalRows,
+        input.importedShipments,
+        input.importedRows,
+        input.failedRows,
+        input.status,
+      ]
+    );
+  }
+
+  async listShipmentImportHistory(limit = 20): Promise<ShipmentImportHistoryRow[]> {
+    const safeLimit = Math.min(100, Math.max(1, limit));
+    const result = await this.pool.query<ShipmentImportHistoryRow>(
+      `SELECT id, file_name, uploaded_by, total_rows, imported_shipments, imported_rows, failed_rows, status, created_at, finished_at
+       FROM shipment_import_history
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [safeLimit]
+    );
+    return result.rows;
   }
 }
 
