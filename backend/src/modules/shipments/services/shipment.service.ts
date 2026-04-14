@@ -1231,6 +1231,25 @@ export class ShipmentService {
     await this.repo.close(id, reason);
   }
 
+  /**
+   * Soft-delete: decouple all POs, sync intake status, then set deleted_at.
+   * Row remains for audit; excluded from operational queries.
+   */
+  async softDelete(id: string, deletedBy: string): Promise<void> {
+    const existing = await this.repo.findById(id);
+    if (!existing) throw new AppError("Shipment not found", 404);
+    const intakeIds = await this.mappingRepo.decoupleAllActiveForShipment(
+      id,
+      deletedBy,
+      "Shipment removed (soft delete)"
+    );
+    for (const intakeId of intakeIds) {
+      await syncPoIntakeStatus(intakeId);
+    }
+    const row = await this.repo.softDelete(id, deletedBy);
+    if (!row) throw new AppError("Shipment could not be deleted", 409);
+  }
+
   async couplePo(shipmentId: string, intakeIds: string[], coupledBy: string): Promise<ShipmentDetail | null> {
     const shipment = await this.repo.findById(shipmentId);
     if (!shipment) throw new AppError("Shipment not found", 404);

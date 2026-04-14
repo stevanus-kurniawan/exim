@@ -16,6 +16,7 @@ import { ShipmentRepository } from "../../shipments/repositories/shipment.reposi
 import { ShipmentPoMappingRepository } from "../../shipments/repositories/shipment-po-mapping.repository.js";
 import { UserRepository } from "../../auth/repositories/user.repository.js";
 import type { ListPoIntakeQuery } from "../dto/index.js";
+import { mergeFilterTokens } from "../../../shared/http-query-multi.js";
 import { readMulterFileAsUtf8 } from "../../../utils/read-multer-upload.js";
 
 const repo = new PoIntakeRepository();
@@ -47,6 +48,21 @@ function parseListQuery(req: Request): ListPoIntakeQuery {
     has_linked_shipment,
     detected_older_than_days:
       detectedOlder != null && !Number.isNaN(detectedOlder) && detectedOlder > 0 ? detectedOlder : undefined,
+    po_numbers: mergeFilterTokens(q, "po_number_exact", "po_numbers_in"),
+    external_ids: mergeFilterTokens(q, "external_id", "external_ids_in"),
+    pts: mergeFilterTokens(q, "pt", "pts_in"),
+    plants: mergeFilterTokens(q, "plant", "plants_in"),
+    supplier_names: mergeFilterTokens(q, "supplier_name", "supplier_names_in"),
+    delivery_locations: mergeFilterTokens(q, "delivery_location", "delivery_locations_in"),
+    incoterm_locations: mergeFilterTokens(q, "incoterm_location", "incoterm_locations_in"),
+    kawasan_berikats: mergeFilterTokens(q, "kawasan_berikat", "kawasan_berikats_in"),
+    currencies: mergeFilterTokens(q, "currency", "currencies_in"),
+    intake_statuses: mergeFilterTokens(q, "intake_statuses", "intake_statuses_in"),
+    taken_by_user_ids: mergeFilterTokens(q, "taken_by_user_id", "taken_by_user_ids_in"),
+    taken_by_names: mergeFilterTokens(q, "taken_by_name", "taken_by_names_in"),
+    taken_at_dates: mergeFilterTokens(q, "taken_at_date", "taken_at_dates_in"),
+    created_at_dates: mergeFilterTokens(q, "created_at_date", "created_at_dates_in"),
+    updated_at_dates: mergeFilterTokens(q, "updated_at_date", "updated_at_dates_in"),
   };
 }
 
@@ -91,6 +107,16 @@ export async function list(req: Request, res: Response, next: NextFunction): Pro
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     sendSuccess(res, items, { meta: { page, limit, total } });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** GET /po/list-filter-options — distinct column values for filters (full database). */
+export async function listFilterOptions(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const data = await service.listFilterOptions();
+    sendSuccess(res, data);
   } catch (e) {
     next(e);
   }

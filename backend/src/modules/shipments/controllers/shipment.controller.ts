@@ -161,6 +161,16 @@ export async function close(req: Request, res: Response, next: NextFunction): Pr
   }
 }
 
+export async function softDelete(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const id = req.params.id as string;
+  try {
+    await service.softDelete(id, actorFromRequest(req));
+    sendSuccess(res, {}, { message: "Shipment removed successfully" });
+  } catch (e) {
+    next(e);
+  }
+}
+
 export async function couplePo(req: Request, res: Response, next: NextFunction): Promise<void> {
   const shipmentId = req.params.id as string;
   const validation = validateCouplePoBody(req);

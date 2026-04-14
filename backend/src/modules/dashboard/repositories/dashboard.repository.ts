@@ -65,7 +65,7 @@ function buildDeliveredShipmentWhere(
   params: unknown[],
   startIdx: number
 ): { where: string; nextIdx: number } {
-  const conditions: string[] = ["s.current_status = 'DELIVERED'"];
+  const conditions: string[] = ["s.current_status = 'DELIVERED'", "s.deleted_at IS NULL"];
   let idx = startIdx;
   if (query.month != null) {
     conditions.push(`EXTRACT(MONTH FROM COALESCE(s.closed_at, s.ata, s.updated_at)) = $${idx++}`);
@@ -378,6 +378,7 @@ export class DashboardRepository {
           (COALESCE(s.closed_at, s.ata, s.updated_at) AT TIME ZONE 'UTC')::date AS delivered_on
         FROM shipments s
         WHERE s.current_status = 'DELIVERED'
+        AND s.deleted_at IS NULL
         AND (COALESCE(s.closed_at, s.ata, s.updated_at) AT TIME ZONE 'UTC')::date >= $1::date
         AND (COALESCE(s.closed_at, s.ata, s.updated_at) AT TIME ZONE 'UTC')::date <= $2::date
       ),

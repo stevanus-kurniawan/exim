@@ -19,6 +19,7 @@ export {
 } from "./dashboard-service";
 export {
   listPo,
+  getPoListFilterOptions,
   getPoDetail,
   takeOwnership,
   createShipmentFromPo,

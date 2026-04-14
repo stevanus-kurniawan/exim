@@ -155,6 +155,14 @@ export async function updateShipment(
   return apiPut<ShipmentDetail>(`shipments/${id}`, payload, accessToken);
 }
 
+/** Soft-delete shipment (decouples POs server-side; row kept for audit). */
+export async function softDeleteShipment(
+  id: string,
+  accessToken: string | null
+): Promise<ApiResponse<unknown>> {
+  return apiDelete(`shipments/${id}`, accessToken);
+}
+
 export async function updateShipmentStatus(
   id: string,
   newStatus: string,

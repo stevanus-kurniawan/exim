@@ -7,6 +7,7 @@ import type {
   PoListItem,
   PoDetail,
   ListPoQuery,
+  PoListFilterOptions,
   CreateTestPoPayload,
   UpdatePoPayload,
   PoImportCsvResult,
@@ -28,6 +29,21 @@ function buildQueryString(query: ListPoQuery): string {
   if (query.has_linked_shipment === true) params.set("has_linked_shipment", "true");
   if (query.has_linked_shipment === false) params.set("has_linked_shipment", "false");
   if (query.detected_older_than_days != null) params.set("detected_older_than_days", String(query.detected_older_than_days));
+  query.po_numbers?.forEach((v) => params.append("po_number_exact", v));
+  query.external_ids?.forEach((v) => params.append("external_id", v));
+  query.pts?.forEach((v) => params.append("pt", v));
+  query.plants?.forEach((v) => params.append("plant", v));
+  query.supplier_names?.forEach((v) => params.append("supplier_name", v));
+  query.delivery_locations?.forEach((v) => params.append("delivery_location", v));
+  query.incoterm_locations?.forEach((v) => params.append("incoterm_location", v));
+  query.kawasan_berikats?.forEach((v) => params.append("kawasan_berikat", v));
+  query.currencies?.forEach((v) => params.append("currency", v));
+  query.intake_statuses?.forEach((v) => params.append("intake_statuses", v));
+  query.taken_by_user_ids?.forEach((v) => params.append("taken_by_user_id", v));
+  query.taken_by_names?.forEach((v) => params.append("taken_by_name", v));
+  query.taken_at_dates?.forEach((v) => params.append("taken_at_date", v));
+  query.created_at_dates?.forEach((v) => params.append("created_at_date", v));
+  query.updated_at_dates?.forEach((v) => params.append("updated_at_date", v));
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
@@ -38,6 +54,12 @@ export async function listPo(
 ): Promise<ApiResponse<PoListItem[]>> {
   const path = `po${buildQueryString(query)}`;
   return apiGet<PoListItem[]>(path, accessToken);
+}
+
+export async function getPoListFilterOptions(
+  accessToken: string | null
+): Promise<ApiResponse<PoListFilterOptions>> {
+  return apiGet<PoListFilterOptions>("po/list-filter-options", accessToken);
 }
 
 export async function getPoDetail(

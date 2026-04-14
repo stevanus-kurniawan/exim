@@ -10,8 +10,88 @@ import type {
   PoImportHistoryRow,
   PoIntakeRow,
   PoIntakeItemRow,
+  PoListFilterOptions,
   UpdatePoIntakeDto,
 } from "../dto/index.js";
+
+const EMPTY_FILTER_TOKEN = "—";
+
+function sortDistinctDisplay(values: string[]): string[] {
+  const set = new Set<string>();
+  for (const v of values) {
+    const t = (v ?? "").trim();
+    set.add(t === "" ? EMPTY_FILTER_TOKEN : t);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function appendMultiTextOrEmpty(
+  conditions: string[],
+  params: unknown[],
+  columnSql: string,
+  values: string[] | undefined,
+  idx: { n: number }
+): void {
+  if (!values?.length) return;
+  const hasEmpty = values.includes(EMPTY_FILTER_TOKEN);
+  const nonempty = values.filter((v) => v !== EMPTY_FILTER_TOKEN).map((v) => v.trim());
+  const parts: string[] = [];
+  if (hasEmpty) {
+    parts.push(`(${columnSql} IS NULL OR TRIM(COALESCE(${columnSql}, '')) = '')`);
+  }
+  if (nonempty.length) {
+    parts.push(`TRIM(COALESCE(${columnSql}, '')) = ANY($${idx.n}::text[])`);
+    params.push(nonempty);
+    idx.n++;
+  }
+  if (parts.length) conditions.push(`(${parts.join(" OR ")})`);
+}
+
+function appendMultiExactOrEmpty(
+  conditions: string[],
+  params: unknown[],
+  columnSql: string,
+  values: string[] | undefined,
+  idx: { n: number }
+): void {
+  if (!values?.length) return;
+  const hasEmpty = values.includes(EMPTY_FILTER_TOKEN);
+  const nonempty = values.filter((v) => v !== EMPTY_FILTER_TOKEN).map((v) => v.trim());
+  const parts: string[] = [];
+  if (hasEmpty) {
+    parts.push(`(${columnSql} IS NULL OR TRIM(COALESCE(${columnSql}::text, '')) = '')`);
+  }
+  if (nonempty.length) {
+    parts.push(`${columnSql} = ANY($${idx.n}::text[])`);
+    params.push(nonempty);
+    idx.n++;
+  }
+  if (parts.length) conditions.push(`(${parts.join(" OR ")})`);
+}
+
+function appendMultiDateOrNull(
+  conditions: string[],
+  params: unknown[],
+  columnSql: string,
+  values: string[] | undefined,
+  idx: { n: number }
+): void {
+  if (!values?.length) return;
+  const hasEmpty = values.includes(EMPTY_FILTER_TOKEN);
+  const nonempty = values.filter((v) => v !== EMPTY_FILTER_TOKEN);
+  const parts: string[] = [];
+  if (hasEmpty) {
+    parts.push(`${columnSql} IS NULL`);
+  }
+  if (nonempty.length) {
+    parts.push(
+      `to_char((${columnSql} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') = ANY($${idx.n}::text[])`
+    );
+    params.push(nonempty);
+    idx.n++;
+  }
+  if (parts.length) conditions.push(`(${parts.join(" OR ")})`);
+}
 
 export class PoIntakeRepository {
   private get pool(): Pool {
@@ -348,7 +428,11 @@ export class PoIntakeRepository {
       conditions.push(`i.intake_status = $${idx++}`);
       params.push(query.intake_status);
     }
-    if (query.po_number) {
+    if (query.po_numbers?.length) {
+      const filterIdx = { n: idx };
+      appendMultiExactOrEmpty(conditions, params, "i.po_number", query.po_numbers, filterIdx);
+      idx = filterIdx.n;
+    } else if (query.po_number) {
       conditions.push(`i.po_number ILIKE $${idx++}`);
       params.push(`%${query.po_number}%`);
     }
@@ -377,9 +461,31 @@ export class PoIntakeRepository {
       );
     }
 
+    const filterIdx = { n: idx };
+    appendMultiTextOrEmpty(conditions, params, "i.external_id", query.external_ids, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "i.pt", query.pts, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "i.plant", query.plants, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "i.supplier_name", query.supplier_names, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "i.delivery_location", query.delivery_locations, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "i.incoterm_location", query.incoterm_locations, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "i.kawasan_berikat", query.kawasan_berikats, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "i.currency", query.currencies, filterIdx);
+    if (query.intake_statuses?.length) {
+      conditions.push(`i.intake_status = ANY($${filterIdx.n}::text[])`);
+      params.push(query.intake_statuses);
+      filterIdx.n++;
+    }
+    appendMultiExactOrEmpty(conditions, params, "i.taken_by_user_id", query.taken_by_user_ids, filterIdx);
+    appendMultiTextOrEmpty(conditions, params, "u.name", query.taken_by_names, filterIdx);
+    appendMultiDateOrNull(conditions, params, "i.taken_at", query.taken_at_dates, filterIdx);
+    appendMultiDateOrNull(conditions, params, "i.created_at", query.created_at_dates, filterIdx);
+    appendMultiDateOrNull(conditions, params, "i.updated_at", query.updated_at_dates, filterIdx);
+    idx = filterIdx.n;
+
+    const fromJoin = `Import_purchase_order i LEFT JOIN users u ON u.id::text = i.taken_by_user_id`;
     const where = conditions.join(" AND ");
     const countResult = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM Import_purchase_order i WHERE ${where}`,
+      `SELECT COUNT(*)::text AS count FROM ${fromJoin} WHERE ${where}`,
       params
     );
     const total = parseInt(countResult.rows[0]?.count ?? "0", 10);
@@ -389,14 +495,128 @@ export class PoIntakeRepository {
       `SELECT i.id, i.external_id, i.po_number, i.plant, i.pt, i.supplier_name, i.delivery_location, i.incoterm_location, i.kawasan_berikat, i.currency,
         i.intake_status, i.created_by_user_id, i.taken_by_user_id, i.taken_at, i.created_at, i.updated_at,
         u.name AS taken_by_name
-       FROM Import_purchase_order i
-       LEFT JOIN users u ON u.id::text = i.taken_by_user_id
+       FROM ${fromJoin}
        WHERE ${where}
        ORDER BY i.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
       params
     );
 
     return { rows: result.rows, total };
+  }
+
+  /**
+   * Distinct values per column for PO list filters (full database).
+   */
+  async listDistinctFilterOptions(): Promise<PoListFilterOptions> {
+    const [
+      poNum,
+      extId,
+      pt,
+      plant,
+      supplier,
+      delivery,
+      inco,
+      kb,
+      cur,
+      status,
+      takerId,
+      takerName,
+      takenDates,
+      createdDates,
+      updatedDates,
+    ] = await Promise.all([
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(i.po_number) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.external_id, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.pt, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.plant, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.supplier_name, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.delivery_location, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.incoterm_location, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.kawasan_berikat, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.currency, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ s: string }>(
+        `SELECT DISTINCT i.intake_status AS s FROM Import_purchase_order i ORDER BY s`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(i.taken_by_user_id::text, '')) AS v FROM Import_purchase_order i ORDER BY v`
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT DISTINCT TRIM(COALESCE(u.name, '')) AS v
+         FROM Import_purchase_order i
+         LEFT JOIN users u ON u.id::text = i.taken_by_user_id
+         ORDER BY v`
+      ),
+      this.pool.query<{ d: string }>(
+        `SELECT DISTINCT to_char((i.taken_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d
+         FROM Import_purchase_order i WHERE i.taken_at IS NOT NULL ORDER BY d`
+      ),
+      this.pool.query<{ d: string }>(
+        `SELECT DISTINCT to_char((i.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d
+         FROM Import_purchase_order i ORDER BY d`
+      ),
+      this.pool.query<{ d: string }>(
+        `SELECT DISTINCT to_char((i.updated_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d
+         FROM Import_purchase_order i ORDER BY d`
+      ),
+    ]);
+
+    const po_numbers = sortDistinctDisplay(poNum.rows.map((r) => r.v));
+    const external_ids = sortDistinctDisplay(extId.rows.map((r) => r.v));
+    const pts = sortDistinctDisplay(pt.rows.map((r) => r.v));
+    const plants = sortDistinctDisplay(plant.rows.map((r) => r.v));
+    const supplier_names = sortDistinctDisplay(supplier.rows.map((r) => r.v));
+    const delivery_locations = sortDistinctDisplay(delivery.rows.map((r) => r.v));
+    const incoterm_locations = sortDistinctDisplay(inco.rows.map((r) => r.v));
+    const kawasan_berikats = sortDistinctDisplay(kb.rows.map((r) => r.v));
+    const currencies = sortDistinctDisplay(cur.rows.map((r) => r.v));
+    const intake_statuses = status.rows.map((r) => r.s).sort((a, b) => a.localeCompare(b));
+    const taken_by_user_ids = sortDistinctDisplay(takerId.rows.map((r) => r.v));
+    const taken_by_names = sortDistinctDisplay(takerName.rows.map((r) => r.v));
+
+    let taken_at_dates = takenDates.rows.map((r) => r.d).sort((a, b) => a.localeCompare(b));
+    const nullTaken = await this.pool.query(`SELECT 1 FROM Import_purchase_order WHERE taken_at IS NULL LIMIT 1`);
+    if (nullTaken.rows.length) {
+      taken_at_dates = [...taken_at_dates, EMPTY_FILTER_TOKEN].sort((a, b) => a.localeCompare(b));
+    }
+
+    const created_at_dates = createdDates.rows.map((r) => r.d).sort((a, b) => a.localeCompare(b));
+    const updated_at_dates = updatedDates.rows.map((r) => r.d).sort((a, b) => a.localeCompare(b));
+
+    return {
+      po_numbers,
+      external_ids,
+      pts,
+      plants,
+      supplier_names,
+      delivery_locations,
+      incoterm_locations,
+      kawasan_berikats,
+      currencies,
+      intake_statuses,
+      taken_by_user_ids,
+      taken_by_names,
+      taken_at_dates,
+      created_at_dates,
+      updated_at_dates,
+    };
   }
 
   async updateIntakeStatus(id: string, intakeStatus: string): Promise<PoIntakeRow | null> {

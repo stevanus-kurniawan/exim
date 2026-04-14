@@ -46,6 +46,7 @@ shipmentRoutes.get(
 shipmentRoutes.get("/:id", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), shipmentController.getById);
 shipmentRoutes.put("/:id", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), shipmentController.update);
 shipmentRoutes.patch("/:id/close", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), shipmentController.close);
+shipmentRoutes.delete("/:id", authMiddleware, requirePermission(PERMISSIONS.UPDATE_SHIPMENT), shipmentController.softDelete);
 
 shipmentRoutes.patch("/:id/status", authMiddleware, requirePermission(PERMISSIONS.UPDATE_STATUS), statusController.updateStatus);
 shipmentRoutes.get("/:id/timeline", authMiddleware, requirePermission(PERMISSIONS.VIEW_SHIPMENTS), statusController.getTimeline);

@@ -114,7 +114,7 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
     return;
   }
   try {
-    await authService.forgotPassword(validation.data.email);
+    await authService.forgotPassword(validation.data.email, req.get("user-agent") ?? undefined);
     sendSuccess(res, {}, { message: "If an account exists with this email, you will receive a password reset link.", statusCode: 200 });
   } catch (e) {
     next(e);

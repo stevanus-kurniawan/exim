@@ -89,11 +89,27 @@ export class ShipmentPoMappingRepository {
               s.atd, s.ata, s.closed_at
        FROM shipment_po_mapping m
        JOIN shipments s ON s.id = m.shipment_id
-       WHERE m.intake_id = $1 AND m.decoupled_at IS NULL
+       WHERE m.intake_id = $1 AND m.decoupled_at IS NULL AND s.deleted_at IS NULL
        ORDER BY m.coupled_at ASC`,
       [intakeId]
     );
     return result.rows;
+  }
+
+  /** Decouple every active PO from this shipment (e.g. before soft-delete). Returns affected intake ids. */
+  async decoupleAllActiveForShipment(
+    shipmentId: string,
+    decoupledBy: string,
+    reason: string | null
+  ): Promise<string[]> {
+    const result = await this.pool.query<{ intake_id: string }>(
+      `UPDATE shipment_po_mapping
+       SET decoupled_at = NOW(), decoupled_by = $2, decouple_reason = $3
+       WHERE shipment_id = $1 AND decoupled_at IS NULL
+       RETURNING intake_id`,
+      [shipmentId, decoupledBy, reason]
+    );
+    return result.rows.map((r) => r.intake_id);
   }
 
   /**

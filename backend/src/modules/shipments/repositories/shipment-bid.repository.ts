@@ -77,7 +77,7 @@ export class ShipmentBidRepository {
          SELECT DISTINCT LOWER(TRIM(v)) AS k
          FROM (
            SELECT forwarder_name AS v FROM shipments
-           WHERE id = $3::uuid AND TRIM(COALESCE(forwarder_name, '')) <> ''
+           WHERE id = $3::uuid AND deleted_at IS NULL AND TRIM(COALESCE(forwarder_name, '')) <> ''
            UNION ALL
            SELECT forwarder_name AS v FROM shipment_bids
            WHERE shipment_id = $3::uuid AND TRIM(COALESCE(forwarder_name, '')) <> ''
@@ -98,7 +98,7 @@ export class ShipmentBidRepository {
            b.ship_via,
            b.updated_at
          FROM shipment_bids b
-         INNER JOIN shipments s ON s.id = b.shipment_id
+         INNER JOIN shipments s ON s.id = b.shipment_id AND s.deleted_at IS NULL
          INNER JOIN used_forwarders u ON LOWER(TRIM(b.forwarder_name)) = u.k
          WHERE TRIM(COALESCE(b.forwarder_name, '')) <> ''
            AND LOWER(TRIM(COALESCE(s.origin_port_country, ''))) = LOWER($2::text)

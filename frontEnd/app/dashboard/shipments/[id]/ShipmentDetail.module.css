@@ -900,6 +900,49 @@
   border-top: 1px solid var(--color-primitive-border-light, #e0e0e0);
 }
 
+.headerActionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2, 10px);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.removeShipmentBtn {
+  padding: var(--spacing-2, 8px) var(--spacing-4, 20px);
+  min-height: 40px;
+  font-size: var(--typography-fontSize-small, 14px);
+  font-weight: var(--typography-fontWeight-medium, 500);
+  font-family: inherit;
+  color: var(--color-semantic-destructive-default, #b3261e);
+  background: var(--color-primitive-background-white, #ffffff);
+  border: 1px solid var(--color-semantic-destructive-default, #b3261e);
+  border-radius: var(--borderRadius-md, 8px);
+  cursor: pointer;
+  transition:
+    background-color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out),
+    color var(--animation-duration-fast, 150ms) var(--animation-easing-default, ease-out);
+}
+
+.removeShipmentBtn:hover {
+  background: rgba(179, 38, 30, 0.06);
+}
+
+.removeShipmentBtn:focus-visible {
+  outline: 2px solid var(--color-primitive-border-dark, #9e9e9e);
+  outline-offset: 2px;
+}
+
+.modalActions .removeShipmentConfirmBtn {
+  background: var(--color-semantic-destructive-default, #b3261e);
+  border-color: var(--color-semantic-destructive-default, #b3261e);
+  color: var(--color-primitive-background-white, #ffffff);
+}
+
+.modalActions .removeShipmentConfirmBtn:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
 .input {
   width: 100%;
   min-width: 0;

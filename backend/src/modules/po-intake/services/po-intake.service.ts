@@ -16,6 +16,7 @@ import type {
   PoCsvImportResult,
   PoImportHistoryRow,
   ListPoIntakeQuery,
+  PoListFilterOptions,
   PoIntakeRow,
   PoIntakeItemRow,
   PoIntakeListItem,
@@ -589,6 +590,10 @@ export class PoIntakeService {
       created_at: r.created_at.toISOString(),
       finished_at: r.finished_at ? r.finished_at.toISOString() : null,
     }));
+  }
+
+  async listFilterOptions(): Promise<PoListFilterOptions> {
+    return this.repo.listDistinctFilterOptions();
   }
 
   async list(query: ListPoIntakeQuery): Promise<{ items: PoIntakeListItem[]; total: number }> {

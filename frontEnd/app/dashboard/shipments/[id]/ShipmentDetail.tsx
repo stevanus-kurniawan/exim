@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useId, type DragEvent } from
 import type { Dispatch, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import {
   getShipmentDetail,
@@ -12,6 +13,7 @@ import {
   getShipmentActivityLog,
   updateShipmentStatus,
   updateShipment,
+  softDeleteShipment,
   couplePo,
   decouplePo,
   updateShipmentPoMapping,
@@ -688,6 +690,7 @@ function ShipmentDocDropZone({
 }
 
 export function ShipmentDetail({ id }: { id: string }) {
+  const router = useRouter();
   const { user, accessToken } = useAuth();
   const { pushToast } = useToast();
   /** Matches backend PUT/PATCH shipment, bids, PO mapping/lines, doc delete, POST notes. */
@@ -708,6 +711,8 @@ export function ShipmentDetail({ id }: { id: string }) {
   const [coupleModalError, setCoupleModalError] = useState<string | null>(null);
   const [coupleIntakeIds, setCoupleIntakeIds] = useState("");
   const [coupling, setCoupling] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingShipment, setDeletingShipment] = useState(false);
   const [decouplingId, setDecouplingId] = useState<string | null>(null);
   const [expandedPoIds, setExpandedPoIds] = useState<string[]>([]);
   const [activePoOverlayId, setActivePoOverlayId] = useState<string | null>(null);
@@ -1120,6 +1125,26 @@ export function ShipmentDetail({ id }: { id: string }) {
         setCoupling(false);
       }
     })();
+  }
+
+  function handleConfirmSoftDelete() {
+    if (!accessToken || !id || !canEditShipment) return;
+    setDeletingShipment(true);
+    setActionError(null);
+    softDeleteShipment(id, accessToken)
+      .then((res) => {
+        if (isApiError(res)) {
+          setActionError(res.message);
+          pushToast(res.message, "error");
+          return;
+        }
+        pushToast("Shipment removed from the active list. Linked Purchase Orders were detached.", "success");
+        router.push("/dashboard/shipments");
+      })
+      .finally(() => {
+        setDeletingShipment(false);
+        setDeleteConfirmOpen(false);
+      });
   }
 
   function handleDecouple(intakeId: string) {
@@ -2660,11 +2685,22 @@ export function ShipmentDetail({ id }: { id: string }) {
           { label: detail.shipment_number },
         ]}
         actions={
-          hasBiddingStep && activeDetailTab === "forwarder-bidding" && canEditShipment && !isUpdatingShipment ? (
-            <Button type="button" variant="primary" className={styles.updateShipmentBtn} onClick={enterUpdateMode}>
-              Update shipment
-            </Button>
-          ) : undefined
+          <div className={styles.headerActionsRow}>
+            {hasBiddingStep && activeDetailTab === "forwarder-bidding" && canEditShipment && !isUpdatingShipment ? (
+              <Button type="button" variant="primary" className={styles.updateShipmentBtn} onClick={enterUpdateMode}>
+                Update shipment
+              </Button>
+            ) : null}
+            {detail && canEditShipment && !isUpdatingShipment ? (
+              <button
+                type="button"
+                className={styles.removeShipmentBtn}
+                onClick={() => setDeleteConfirmOpen(true)}
+              >
+                Remove shipment
+              </button>
+            ) : null}
+          </div>
         }
       />
 
@@ -4418,6 +4454,44 @@ export function ShipmentDetail({ id }: { id: string }) {
         </aside>
       </div>
         </>
+      )}
+
+      {deleteConfirmOpen && canEditShipment && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => !deletingShipment && setDeleteConfirmOpen(false)}
+          role="presentation"
+        >
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="delete-shipment-title">
+            <h3 id="delete-shipment-title" className={styles.modalTitle}>
+              Remove this shipment?
+            </h3>
+            <p className={styles.modalHint}>
+              This performs a soft delete: the shipment is hidden from lists and dashboards, and any Purchase Orders
+              still linked to it are detached. The record is kept in the database for audit. This cannot be undone from
+              the app.
+            </p>
+            <div className={styles.modalActions}>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleConfirmSoftDelete}
+                disabled={deletingShipment}
+                className={styles.removeShipmentConfirmBtn}
+              >
+                {deletingShipment ? "Removing…" : "Yes, remove shipment"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setDeleteConfirmOpen(false)}
+                disabled={deletingShipment}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {coupleModal && canCoupleDecouplePo && (

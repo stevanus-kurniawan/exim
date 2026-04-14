@@ -189,7 +189,7 @@ The backend container must see the **same** files as the host mount. Otherwise `
 
 ### 6.1 Bind mount
 
-In **`docker-compose.staging.backend.yml`** the host path is bound into the container:
+In **`docker-compose.staging.backend.yml`** and **`docker-compose.production.backend.yml`** the host path is bound into the container:
 
 ```yaml
 volumes:
@@ -200,7 +200,7 @@ volumes:
 
 ### 6.2 Env file for Compose
 
-`docker-compose.staging.backend.yml` loads **`./backend/.env`**. Ensure it contains:
+`docker-compose.staging.backend.yml` and `docker-compose.production.backend.yml` load **`./backend/.env`**. Ensure it contains:
 
 - Database and JWT settings, and  
 - **Option B** storage variables (or `STORAGE_LOCAL_PATH`), matching the path under `/mnt/synology/eos/...`.
@@ -211,6 +211,10 @@ Copy from **`backend/.env.example`** and adjust secrets.
 
 ```bash
 docker compose -f docker-compose.staging.backend.yml up -d --force-recreate backend
+```
+
+```bash
+docker compose -f docker-compose.production.backend.yml up -d --force-recreate backend
 ```
 
 ### 6.4 Verify inside the container
@@ -263,4 +267,6 @@ This should match **`ls`** on the host for the same path.
 | `backend/.env.example` | Storage variables (Option B, A, C) |
 | Root `.env.example` | `STORAGE_HOST_MOUNT` / `STORAGE_HOST_BIND` for Compose |
 | `docker-compose.staging.backend.yml` | Staging backend + NAS bind |
+| `docker-compose.production.backend.yml` | Production backend + Postgres + NAS bind |
+| `docker-compose.production.frontend.yml` | Production frontend-only stack (for separate frontend host) |
 | `docs/TSD.md` | Broader document storage strategy |
