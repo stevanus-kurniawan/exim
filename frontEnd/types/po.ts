@@ -28,6 +28,47 @@ export interface ListPoQuery {
   search?: string;
   intake_status?: string;
   po_number?: string;
+  /** Matches backend GET /po — unclaimed POs only. */
+  unclaimed_only?: boolean;
+  /** `false`: no active shipment_po_mapping; `true`: at least one active mapping. */
+  has_linked_shipment?: boolean;
+  /** Stale “detected” filter: `created_at` older than N full days. */
+  detected_older_than_days?: number;
+  /** Column filters (multi-select); combined with AND on the server. */
+  po_numbers?: string[];
+  external_ids?: string[];
+  pts?: string[];
+  plants?: string[];
+  supplier_names?: string[];
+  delivery_locations?: string[];
+  incoterm_locations?: string[];
+  kawasan_berikats?: string[];
+  currencies?: string[];
+  intake_statuses?: string[];
+  taken_by_user_ids?: string[];
+  taken_by_names?: string[];
+  taken_at_dates?: string[];
+  created_at_dates?: string[];
+  updated_at_dates?: string[];
+}
+
+/** GET /po/list-filter-options */
+export interface PoListFilterOptions {
+  po_numbers: string[];
+  external_ids: string[];
+  pts: string[];
+  plants: string[];
+  supplier_names: string[];
+  delivery_locations: string[];
+  incoterm_locations: string[];
+  kawasan_berikats: string[];
+  currencies: string[];
+  intake_statuses: string[];
+  taken_by_user_ids: string[];
+  taken_by_names: string[];
+  taken_at_dates: string[];
+  created_at_dates: string[];
+  updated_at_dates: string[];
 }
 
 export interface ListPoMeta {
@@ -117,4 +158,71 @@ export interface CreateTestPoPayload {
   /** Currency for this PO (e.g. USD, IDR). Shown in form; may be used for items. */
   currency?: string;
   items?: CreateTestPoItem[];
+}
+
+/** PATCH /po/:id — matches backend UpdatePoIntakeDto. */
+export interface UpdatePoItemPayload {
+  id?: string;
+  line_number?: number;
+  item_description: string;
+  qty: number;
+  unit: string;
+  value: number;
+}
+
+export interface UpdatePoPayload {
+  po_number: string;
+  plant?: string;
+  pt?: string;
+  supplier_name: string;
+  delivery_location?: string;
+  incoterm_location?: string;
+  kawasan_berikat?: string;
+  currency?: string;
+  items: UpdatePoItemPayload[];
+}
+
+export interface PoImportCsvErrorRow {
+  row: number;
+  field: string;
+  po_number: string;
+  message: string;
+}
+
+export interface PoImportCsvResult {
+  total_rows: number;
+  imported_pos: number;
+  imported_rows: number;
+  failed_rows: number;
+  summary: string;
+  errors: PoImportCsvErrorRow[];
+}
+
+export interface PoImportHistoryItem {
+  id: string;
+  file_name: string | null;
+  uploaded_by: string;
+  total_rows: number;
+  imported_pos: number;
+  imported_rows: number;
+  failed_rows: number;
+  status: string;
+  created_at: string;
+  finished_at: string | null;
+}
+
+/** GET /po/:id/activity-log — aligned with shipment activity log shape. */
+export interface PoIntakeActivityItem {
+  id: string;
+  type: "po_created" | "po_claimed" | "couple_shipment" | "decouple_shipment" | "po_updated";
+  title: string;
+  detail: string | null;
+  field_changes?: Array<{
+    field: string;
+    label: string;
+    before: string | null;
+    after: string | null;
+  }>;
+  actor: string;
+  occurred_at: string;
 }

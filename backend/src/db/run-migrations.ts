@@ -3,6 +3,7 @@
  * Requires DATABASE_URL. Run from backend directory: npm run migrate.
  */
 
+import "./load-env.js";
 import { readdir, readFile } from "fs/promises";
 import { join } from "path";
 import { getPool, closeDb } from "./index.js";

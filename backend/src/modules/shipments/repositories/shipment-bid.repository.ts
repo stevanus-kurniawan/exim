@@ -11,7 +11,7 @@ import type {
 } from "../dto/index.js";
 
 const COLUMNS =
-  "id, shipment_id, forwarder_name, service_amount, duration, origin_port, destination_port, ship_via, quotation_file_name, quotation_storage_key, created_at, updated_at";
+  "id, shipment_id, forwarder_name, service_amount, duration, quotation_expires_at, origin_port, destination_port, ship_via, quotation_file_name, quotation_storage_key, created_at, updated_at";
 
 export class ShipmentBidRepository {
   private get pool(): Pool {
@@ -26,6 +26,98 @@ export class ShipmentBidRepository {
     return result.rows;
   }
 
+  /**
+   * Recent forwarders from historical bids (latest bid per forwarder).
+   * Used for quick re-selection in bidding UX.
+   *
+   * Only forwarders already on `forShipmentId` (shipment liner or a bid on that shipment), with a historical bid
+   * on some shipment whose `origin_port_country` matches (case-insensitive), and quotation not expired:
+   * `quotation_expires_at` date >= today, or legacy `duration` (first integer = days) from `updated_at` still in the future;
+   * rows with neither expiry still count as valid (matches frontend). Empty `originPortCountry` or no used forwarders → no rows.
+   */
+  async findRecentForwarders(
+    limit: number,
+    originPortCountry: string | null | undefined,
+    forShipmentId: string
+  ): Promise<
+    Array<{
+      forwarder_name: string;
+      shipment_id: string;
+      duration: string | null;
+      quotation_expires_at: Date | null;
+      service_amount: number | null;
+      origin_port: string | null;
+      destination_port: string | null;
+      origin_country: string | null;
+      destination_country: string | null;
+      ship_via: string | null;
+      updated_at: Date;
+    }>
+  > {
+    const safeLimit = Math.max(1, Math.min(200, limit));
+    const country = (originPortCountry ?? "").trim();
+    if (!country) return [];
+
+    const params: unknown[] = [safeLimit, country, forShipmentId];
+
+    const result = await this.pool.query<{
+      forwarder_name: string;
+      shipment_id: string;
+      duration: string | null;
+      quotation_expires_at: Date | null;
+      service_amount: number | null;
+      origin_port: string | null;
+      destination_port: string | null;
+      origin_country: string | null;
+      destination_country: string | null;
+      ship_via: string | null;
+      updated_at: Date;
+    }>(
+      `WITH used_forwarders AS (
+         SELECT DISTINCT LOWER(TRIM(v)) AS k
+         FROM (
+           SELECT forwarder_name AS v FROM shipments
+           WHERE id = $3::uuid AND deleted_at IS NULL AND TRIM(COALESCE(forwarder_name, '')) <> ''
+           UNION ALL
+           SELECT forwarder_name AS v FROM shipment_bids
+           WHERE shipment_id = $3::uuid AND TRIM(COALESCE(forwarder_name, '')) <> ''
+         ) x
+       )
+       SELECT *
+       FROM (
+         SELECT DISTINCT ON (LOWER(TRIM(b.forwarder_name)))
+           TRIM(b.forwarder_name) AS forwarder_name,
+           b.shipment_id,
+           b.duration,
+           b.quotation_expires_at,
+           b.service_amount,
+           b.origin_port,
+           b.destination_port,
+           s.origin_port_country AS origin_country,
+           s.destination_port_country AS destination_country,
+           b.ship_via,
+           b.updated_at
+         FROM shipment_bids b
+         INNER JOIN shipments s ON s.id = b.shipment_id AND s.deleted_at IS NULL
+         INNER JOIN used_forwarders u ON LOWER(TRIM(b.forwarder_name)) = u.k
+         WHERE TRIM(COALESCE(b.forwarder_name, '')) <> ''
+           AND LOWER(TRIM(COALESCE(s.origin_port_country, ''))) = LOWER($2::text)
+           AND (
+             CASE
+               WHEN b.quotation_expires_at IS NOT NULL THEN b.quotation_expires_at::date >= CURRENT_DATE
+               WHEN b.duration ~ '[0-9]+' THEN b.updated_at + ((SUBSTRING(b.duration FROM '[0-9]+'))::int * INTERVAL '1 day') >= NOW()
+               ELSE TRUE
+             END
+           )
+         ORDER BY LOWER(TRIM(b.forwarder_name)), b.updated_at DESC
+       ) latest
+       ORDER BY updated_at DESC
+       LIMIT $1`,
+      params
+    );
+    return result.rows;
+  }
+
   async findById(id: string): Promise<ShipmentBidRow | null> {
     const result = await this.pool.query<ShipmentBidRow>(
       `SELECT ${COLUMNS} FROM shipment_bids WHERE id = $1`,
@@ -36,14 +128,15 @@ export class ShipmentBidRepository {
 
   async create(shipmentId: string, dto: CreateShipmentBidDto): Promise<ShipmentBidRow> {
     const result = await this.pool.query<ShipmentBidRow>(
-      `INSERT INTO shipment_bids (shipment_id, forwarder_name, service_amount, duration, origin_port, destination_port, ship_via, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      `INSERT INTO shipment_bids (shipment_id, forwarder_name, service_amount, duration, quotation_expires_at, origin_port, destination_port, ship_via, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
        RETURNING ${COLUMNS}`,
       [
         shipmentId,
         dto.forwarder_name.trim(),
         dto.service_amount ?? null,
         dto.duration?.trim() ?? null,
+        dto.quotation_expires_at ?? null,
         dto.origin_port?.trim() ?? null,
         dto.destination_port?.trim() ?? null,
         dto.ship_via?.trim() ?? null,
@@ -67,6 +160,10 @@ export class ShipmentBidRepository {
     if (dto.duration !== undefined) {
       updates.push(`duration = $${idx++}`);
       params.push(dto.duration.trim() || null);
+    }
+    if (dto.quotation_expires_at !== undefined) {
+      updates.push(`quotation_expires_at = $${idx++}`);
+      params.push(dto.quotation_expires_at);
     }
     if (dto.origin_port !== undefined) {
       updates.push(`origin_port = $${idx++}`);

@@ -7,7 +7,9 @@ import { Router } from "express";
 import { authMiddleware } from "../auth/auth.middleware.js";
 import { requirePermission } from "../auth/rbac.middleware.js";
 import { PERMISSIONS } from "../../shared/rbac.js";
+import { uploadSingle } from "../../middlewares/upload.middleware.js";
 import * as controller from "./controllers/po-intake.controller.js";
+import * as activityController from "./controllers/po-intake-activity.controller.js";
 
 export const poIntakeRoutes = Router();
 
@@ -19,10 +21,47 @@ poIntakeRoutes.post(
 );
 poIntakeRoutes.get("/", authMiddleware, requirePermission(PERMISSIONS.VIEW_PO_INTAKE), controller.list);
 poIntakeRoutes.get(
+  "/list-filter-options",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_PO_INTAKE),
+  controller.listFilterOptions
+);
+poIntakeRoutes.get(
   "/lookup-by-po-number",
   authMiddleware,
   requirePermission(PERMISSIONS.VIEW_PO_INTAKE),
   controller.lookupByPoNumber
+);
+poIntakeRoutes.get(
+  "/import/template-csv",
+  authMiddleware,
+  requirePermission(PERMISSIONS.IMPORT_PO_CSV),
+  controller.downloadImportTemplate
+);
+poIntakeRoutes.get(
+  "/import/history",
+  authMiddleware,
+  requirePermission(PERMISSIONS.IMPORT_PO_CSV),
+  controller.listImportHistory
+);
+poIntakeRoutes.post(
+  "/import/csv",
+  authMiddleware,
+  requirePermission(PERMISSIONS.IMPORT_PO_CSV),
+  uploadSingle,
+  controller.importCsv
+);
+poIntakeRoutes.patch(
+  "/:id",
+  authMiddleware,
+  requirePermission(PERMISSIONS.UPDATE_PO_INTAKE),
+  controller.updateIntake
+);
+poIntakeRoutes.get(
+  "/:id/activity-log",
+  authMiddleware,
+  requirePermission(PERMISSIONS.VIEW_PO_INTAKE),
+  activityController.getActivityLog
 );
 poIntakeRoutes.get("/:id", authMiddleware, requirePermission(PERMISSIONS.VIEW_PO_INTAKE), controller.getById);
 poIntakeRoutes.post("/:id/take", authMiddleware, requirePermission(PERMISSIONS.TAKE_OWNERSHIP), controller.takeOwnership);
