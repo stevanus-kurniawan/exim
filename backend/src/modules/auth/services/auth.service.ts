@@ -63,10 +63,10 @@ export class AuthService {
 
     const authUser = userRowToAuthUser(user);
     const accessToken = this.signAccessToken(authUser);
-    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "1h");
+    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "4h");
 
     const refreshTokenValue = randomBytes(32).toString("hex");
-    const refreshExpires = config.jwt.refreshExpiresIn ?? "7d";
+    const refreshExpires = config.jwt.refreshExpiresIn ?? "4h";
     const refreshExpiresSeconds = expiresInSeconds(refreshExpires);
     const refreshExpiresAt = new Date(Date.now() + refreshExpiresSeconds * 1000);
     await this.refreshTokenRepo.create({
@@ -108,11 +108,11 @@ export class AuthService {
 
     const authUser = userRowToAuthUser(user);
     const accessToken = this.signAccessToken(authUser);
-    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "1h");
+    const expiresIn = expiresInSeconds(config.jwt.accessExpiresIn ?? "4h");
 
     await this.refreshTokenRepo.revokeByToken(refreshToken);
     const newRefreshValue = randomBytes(32).toString("hex");
-    const refreshExpiresSeconds = expiresInSeconds(config.jwt.refreshExpiresIn ?? "7d");
+    const refreshExpiresSeconds = expiresInSeconds(config.jwt.refreshExpiresIn ?? "4h");
     const refreshExpiresAt = new Date(Date.now() + refreshExpiresSeconds * 1000);
     await this.refreshTokenRepo.create({
       userId: user.id,
@@ -186,7 +186,7 @@ export class AuthService {
   private signAccessToken(user: AuthUser): string {
     const secret = config.jwt.accessSecret;
     if (!secret) throw new AppError("Auth is not configured", 500);
-    const expiresIn = config.jwt.accessExpiresIn ?? "1h";
+    const expiresIn = config.jwt.accessExpiresIn ?? "4h";
     return jwt.sign(
       {
         sub: user.id,

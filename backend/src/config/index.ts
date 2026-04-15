@@ -60,6 +60,21 @@ function resolveStorageLocalPath(): string {
   return "./uploads";
 }
 
+/** Parse JWT_ACCESS_EXPIRES_IN / JWT_REFRESH_EXPIRES_IN (e.g. "4h", "7d") to milliseconds. */
+function parseJwtDurationToMs(exp: string): number {
+  const match = exp.match(/^(\d+)(s|m|h|d)$/i);
+  if (!match) return 3600 * 1000;
+  const n = parseInt(match[1]!, 10);
+  const unit = match[2]!.toLowerCase();
+  let seconds: number;
+  if (unit === "s") seconds = n;
+  else if (unit === "m") seconds = n * 60;
+  else if (unit === "h") seconds = n * 3600;
+  else if (unit === "d") seconds = n * 86400;
+  else seconds = 3600;
+  return seconds * 1000;
+}
+
 export const config = {
   nodeEnv: getEnvOptional("NODE_ENV", "development"),
   /** When set, applied as `app.set("trust proxy", value)`. See parseTrustProxy. */
@@ -76,8 +91,12 @@ export const config = {
     accessSecret: getEnvOptional("JWT_ACCESS_SECRET"),
     /** Unused: refresh tokens are opaque DB rows. Kept for future JWT-based refresh or ops consistency. */
     refreshSecret: getEnvOptional("JWT_REFRESH_SECRET"),
-    accessExpiresIn: getEnvOptional("JWT_ACCESS_EXPIRES_IN", "1h"),
-    refreshExpiresIn: getEnvOptional("JWT_REFRESH_EXPIRES_IN", "7d"),
+    accessExpiresIn: getEnvOptional("JWT_ACCESS_EXPIRES_IN", "4h"),
+    refreshExpiresIn: getEnvOptional("JWT_REFRESH_EXPIRES_IN", "4h"),
+    /** HttpOnly refresh cookie maxAge; must match DB refresh expiry (see auth-cookies). */
+    refreshExpiresInMs: parseJwtDurationToMs(
+      getEnvOptional("JWT_REFRESH_EXPIRES_IN", "4h") ?? "4h"
+    ),
   },
   storage: {
     type: getEnvOptional("STORAGE_TYPE", "local"),

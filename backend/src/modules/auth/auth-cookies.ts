@@ -8,8 +8,6 @@ import { config } from "../../config/index.js";
 export const ACCESS_TOKEN_COOKIE = "eos_access";
 export const REFRESH_TOKEN_COOKIE = "eos_refresh";
 
-const REFRESH_MAX_MS = 7 * 24 * 60 * 60 * 1000;
-
 export function setAuthCookies(
   res: Response,
   data: { access_token: string; refresh_token: string; expires_in: number }
@@ -28,7 +26,7 @@ export function setAuthCookies(
     httpOnly: true,
     secure,
     sameSite: "lax",
-    maxAge: REFRESH_MAX_MS,
+    maxAge: config.jwt.refreshExpiresInMs,
     path: "/",
   });
 }
