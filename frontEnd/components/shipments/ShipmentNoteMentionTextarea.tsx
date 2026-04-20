@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { listMentionableUsers } from "@/services/users-service";
 import type { MentionableUser } from "@/types/users";
 import { isApiError } from "@/types/api";
 import styles from "./ShipmentNoteMentionTextarea.module.css";
+
+const MENTION_TOKEN =
+  /@\[([^\]]*)\]\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/gi;
 
 export interface ShipmentNoteMentionTextareaProps {
   id: string;
@@ -38,6 +41,171 @@ function sanitizeMentionLabel(name: string, email: string): string {
   return email.replace(/\]/g, "").slice(0, 120);
 }
 
+/** Serialize editor DOM to API string (handles nested divs / BR from contenteditable). */
+function serializeEditor(root: HTMLElement): string {
+  let out = "";
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent ?? "";
+      return;
+    }
+    if (node.nodeName === "BR") {
+      out += "\n";
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      const id = el.dataset.mentionId;
+      if (id) {
+        const raw = el.textContent ?? "";
+        const label = raw.startsWith("@") ? raw.slice(1) : raw;
+        const safe = label.replace(/\]/g, "").trim() || "user";
+        out += `@[${safe}](${id})`;
+        return;
+      }
+      for (const c of el.childNodes) walk(c);
+    }
+  };
+  for (const c of root.childNodes) walk(c);
+  return out;
+}
+
+function fillEditorFromSerialized(root: HTMLElement, serialized: string, chipClass: string): void {
+  root.replaceChildren();
+  const re = new RegExp(MENTION_TOKEN.source, "gi");
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(serialized)) !== null) {
+    if (m.index > last) {
+      root.appendChild(document.createTextNode(serialized.slice(last, m.index)));
+    }
+    const span = document.createElement("span");
+    span.contentEditable = "false";
+    span.className = chipClass;
+    span.dataset.mentionId = m[2]!;
+    const display = (m[1] ?? "").trim() || "user";
+    span.textContent = `@${display}`;
+    root.appendChild(span);
+    last = m.index + m[0].length;
+  }
+  if (last < serialized.length) {
+    root.appendChild(document.createTextNode(serialized.slice(last)));
+  }
+}
+
+function getCaretSerializedOffset(root: HTMLElement): number {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !root.contains(sel.anchorNode)) {
+    return serializeEditor(root).length;
+  }
+  const range = sel.getRangeAt(0).cloneRange();
+  range.collapse(true);
+  const marker = document.createTextNode("\ufeff");
+  range.insertNode(marker);
+  const serialized = serializeEditor(root);
+  const idx = serialized.indexOf("\ufeff");
+  marker.remove();
+  return idx < 0 ? serialized.length : idx;
+}
+
+function setCaretSerializedOffset(root: HTMLElement, offset: number): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const selection: Selection = sel;
+  let pos = 0;
+  let done = false;
+
+  function placeText(n: Text, o: number) {
+    const len = (n.textContent ?? "").length;
+    const oClamped = Math.max(0, Math.min(o, len));
+    const r = document.createRange();
+    r.setStart(n, oClamped);
+    r.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(r);
+    done = true;
+  }
+
+  function walk(node: Node): void {
+    if (done) return;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = node as Text;
+      const len = (t.textContent ?? "").length;
+      if (pos + len >= offset) {
+        placeText(t, offset - pos);
+        return;
+      }
+      pos += len;
+      return;
+    }
+    if (node.nodeName === "BR") {
+      if (pos + 1 >= offset) {
+        const r = document.createRange();
+        if (offset <= pos) {
+          r.setStartBefore(node);
+        } else {
+          r.setStartAfter(node);
+        }
+        r.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(r);
+        done = true;
+        return;
+      }
+      pos += 1;
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      const id = el.dataset.mentionId;
+      if (id) {
+        const raw = el.textContent ?? "";
+        const label = raw.startsWith("@") ? raw.slice(1) : raw;
+        const safe = label.replace(/\]/g, "").trim() || "user";
+        const len = `@[${safe}](${id})`.length;
+        if (pos + len >= offset) {
+          const r = document.createRange();
+          r.setStartAfter(el);
+          r.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(r);
+          done = true;
+          return;
+        }
+        pos += len;
+        return;
+      }
+      for (const c of el.childNodes) {
+        walk(c);
+        if (done) return;
+      }
+    }
+  }
+
+  for (const c of root.childNodes) {
+    walk(c);
+    if (done) return;
+  }
+
+  const r = document.createRange();
+  r.selectNodeContents(root);
+  r.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(r);
+}
+
+function insertPlainTextAtRange(text: string): void {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  range.insertNode(document.createTextNode(text));
+  range.setStartAfter(range.endContainer);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export function ShipmentNoteMentionTextarea({
   id,
   value,
@@ -49,10 +217,10 @@ export function ShipmentNoteMentionTextarea({
   className,
   "aria-describedby": ariaDescribedBy,
 }: ShipmentNoteMentionTextareaProps) {
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
   const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionStart, setMentionStart] = useState(0);
   const [mentionQuery, setMentionQuery] = useState("");
   const [candidates, setCandidates] = useState<MentionableUser[]>([]);
   const [loadingMentions, setLoadingMentions] = useState(false);
@@ -89,40 +257,30 @@ export function ShipmentNoteMentionTextarea({
   useEffect(() => {
     if (!mentionOpen) return;
     const onDoc = (e: MouseEvent) => {
-      const el = taRef.current;
-      if (!el) return;
+      const wrap = wrapRef.current;
       const t = e.target;
-      if (t instanceof Node && el.contains(t)) return;
+      if (wrap && t instanceof Node && wrap.contains(t)) return;
       setMentionOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [mentionOpen]);
 
-  function applyMention(user: MentionableUser) {
-    const el = taRef.current;
-    const cursor = el?.selectionStart ?? value.length;
-    const label = sanitizeMentionLabel(user.name, user.email);
-    const token = `@[${label}](${user.id})`;
-    const before = value.slice(0, mentionStart);
-    const after = value.slice(cursor);
-    const next = `${before}${token} ${after}`;
-    onChange(next);
-    setMentionOpen(false);
-    requestAnimationFrame(() => {
-      const pos = before.length + token.length + 1;
-      el?.focus();
-      el?.setSelectionRange(pos, pos);
-    });
-  }
+  useLayoutEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const current = serializeEditor(el);
+    if (current === value) return;
+    fillEditorFromSerialized(el, value, styles.mentionChip);
+  }, [value]);
 
-  function onInputChange(next: string) {
-    onChange(next);
-    const el = taRef.current;
-    const cursor = el?.selectionStart ?? next.length;
-    const m = getActiveMention(next, cursor);
+  function syncMentionStateFromEditor() {
+    const el = editorRef.current;
+    if (!el) return;
+    const serialized = serializeEditor(el);
+    const caret = getCaretSerializedOffset(el);
+    const m = getActiveMention(serialized, caret);
     if (m) {
-      setMentionStart(m.start);
       setMentionQuery(m.query);
       setMentionOpen(true);
       setHighlightIdx(0);
@@ -131,58 +289,93 @@ export function ShipmentNoteMentionTextarea({
     }
   }
 
-  function onSelectChange() {
-    const el = taRef.current;
+  function emitFromEditor() {
+    const el = editorRef.current;
     if (!el) return;
-    const m = getActiveMention(value, el.selectionStart ?? 0);
-    if (m) {
-      setMentionStart(m.start);
-      setMentionQuery(m.query);
-      setMentionOpen(true);
-    } else {
-      setMentionOpen(false);
-    }
+    onChange(serializeEditor(el));
+    syncMentionStateFromEditor();
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (!mentionOpen || candidates.length === 0) {
-      if (e.key === "Escape") setMentionOpen(false);
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHighlightIdx((i) => Math.min(i + 1, candidates.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHighlightIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      applyMention(candidates[highlightIdx]!);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setMentionOpen(false);
-    }
+  function applyMention(user: MentionableUser) {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    const serialized = serializeEditor(el);
+    const caret = getCaretSerializedOffset(el);
+    const m = getActiveMention(serialized, caret);
+    if (!m) return;
+    const label = sanitizeMentionLabel(user.name, user.email);
+    const token = `@[${label}](${user.id})`;
+    const next = `${serialized.slice(0, m.start)}${token} ${serialized.slice(caret)}`;
+    onChange(next);
+    fillEditorFromSerialized(el, next, styles.mentionChip);
+    setMentionOpen(false);
+    requestAnimationFrame(() => {
+      setCaretSerializedOffset(el, m.start + token.length + 1);
+    });
   }
+
+  function onEditorInput() {
+    emitFromEditor();
+  }
+
+  function onPaste(e: React.ClipboardEvent) {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    insertPlainTextAtRange(text);
+    emitFromEditor();
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (mentionOpen && candidates.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHighlightIdx((i) => Math.min(i + 1, candidates.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setHighlightIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        applyMention(candidates[highlightIdx]!);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionOpen(false);
+        return;
+      }
+    }
+    if (e.key === "Escape") setMentionOpen(false);
+  }
+
+  const editorClass = [styles.editor, className].filter(Boolean).join(" ");
+  const minHeightRem = Math.max(4, rows) * 1.25;
 
   return (
-    <div className={styles.wrap}>
-      <textarea
-        ref={taRef}
+    <div ref={wrapRef} className={styles.wrap}>
+      <div
+        ref={editorRef}
         id={id}
-        className={className ?? styles.textarea}
-        value={value}
-        onChange={(e) => onInputChange(e.target.value)}
-        onInput={onSelectChange}
-        onKeyUp={onSelectChange}
-        onKeyDown={onKeyDown}
-        onClick={onSelectChange}
-        placeholder={placeholder}
-        rows={rows}
-        disabled={disabled}
+        role="textbox"
+        aria-multiline="true"
+        contentEditable={!disabled}
+        suppressContentEditableWarning
+        className={editorClass}
+        style={{ minHeight: `${minHeightRem}rem` }}
+        data-placeholder={placeholder}
         aria-autocomplete={mentionOpen ? "list" : undefined}
         aria-controls={mentionOpen ? listId : undefined}
         aria-expanded={mentionOpen}
         aria-describedby={ariaDescribedBy}
+        onInput={onEditorInput}
+        onKeyUp={syncMentionStateFromEditor}
+        onClick={syncMentionStateFromEditor}
+        onPaste={onPaste}
+        onKeyDown={onKeyDown}
       />
       {mentionOpen ? (
         <div id={listId} className={styles.dropdown} role="listbox" aria-label="Mention user">
@@ -198,7 +391,7 @@ export function ShipmentNoteMentionTextarea({
                 role="option"
                 aria-selected={i === highlightIdx}
                 className={`${styles.dropdownItem} ${i === highlightIdx ? styles.dropdownItemActive : ""}`}
-                onMouseDown={(e) => e.preventDefault()}
+                onMouseDown={(ev) => ev.preventDefault()}
                 onClick={() => applyMention(u)}
               >
                 {u.name || u.email}
