@@ -119,6 +119,19 @@ async function generateExternalId(repo: PoIntakeRepository, poNumber: string): P
   return candidate;
 }
 
+/** node-pg returns DECIMAL/NUMERIC as strings — coerce so JSON clients get real numbers. */
+function coercePgNumeric(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const t = value.replace(/,/g, "").trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 async function buildDetail(
   lineReceivedRepo: ShipmentPoLineReceivedRepository,
   row: PoIntakeRow,
@@ -129,7 +142,8 @@ async function buildDetail(
 ): Promise<PoIntakeDetail> {
   const itemsOut = await Promise.all(
     items.map(async (it) => {
-      const qty = it.qty ?? 0;
+      const qtyN = coercePgNumeric(it.qty);
+      const qty = qtyN ?? 0;
       const receivedQty = await lineReceivedRepo.getTotalReceivedByIntakeItem(row.id, it.id);
       const remainingQty = Math.max(0, qty - receivedQty);
       const overReceivedPct =
@@ -138,9 +152,9 @@ async function buildDetail(
         id: it.id,
         line_number: it.line_number,
         item_description: it.item_description,
-        qty: it.qty,
+        qty: qtyN,
         unit: it.unit,
-        value: it.value,
+        value: coercePgNumeric(it.value),
         received_qty: receivedQty,
         remaining_qty: remainingQty,
         over_received_pct: overReceivedPct,

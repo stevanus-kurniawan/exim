@@ -10,7 +10,7 @@ services:
     env_file:
       - ./frontEnd/.env
     environment:
-      NODE_ENV: deployment
+      NODE_ENV: development
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL}
     ports:
