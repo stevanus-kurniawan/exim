@@ -6,16 +6,17 @@ import { Router } from "express";
 import { login, refresh, logout, getMe, verifyEmail, forgotPassword, resetPassword } from "./controllers/auth.controller.js";
 import { authMiddleware } from "./auth.middleware.js";
 import {
-  authCredentialLimiter,
+  loginLimiter,
+  refreshAndLogoutLimiter,
   authTokenFlowLimiter,
   forgotPasswordLimiter,
 } from "../../middlewares/auth-rate-limit.js";
 
 export const authRoutes = Router();
 
-authRoutes.post("/login", authCredentialLimiter, login);
-authRoutes.post("/refresh", authCredentialLimiter, refresh);
-authRoutes.post("/logout", authCredentialLimiter, logout);
+authRoutes.post("/login", loginLimiter, login);
+authRoutes.post("/refresh", refreshAndLogoutLimiter, refresh);
+authRoutes.post("/logout", refreshAndLogoutLimiter, logout);
 authRoutes.get("/me", authMiddleware, getMe);
 
 authRoutes.post("/verify-email", authTokenFlowLimiter, verifyEmail);

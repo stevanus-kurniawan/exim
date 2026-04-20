@@ -85,6 +85,19 @@ export const PT_PLANT_MAP: Record<PtOptionLabel, PtPlantConfig> = {
   "SUMBER PANGAN CEMERLANG": { mode: "fixed", plant: "LUBUK GAUNG" },
 };
 
+/** Lowercase PT → canonical label from `PT_OPTION_LABELS` (for API/import casing drift). */
+const PT_LABEL_BY_LOWER = new Map(PT_OPTION_LABELS.map((l) => [l.toLowerCase(), l]));
+
+/**
+ * Map stored PT from API/import to the canonical option label when a case-insensitive match exists.
+ * Otherwise returns trimmed input (may not appear in `PT_PLANT_MAP`).
+ */
+export function canonicalizePtLabel(stored: string | null | undefined): string {
+  const t = (stored ?? "").trim();
+  if (t === "") return "";
+  return PT_LABEL_BY_LOWER.get(t.toLowerCase()) ?? t;
+}
+
 export function getPlantConfigForPt(pt: string): PtPlantConfig | null {
   if (!pt || !(pt in PT_PLANT_MAP)) return null;
   return PT_PLANT_MAP[pt as PtOptionLabel];

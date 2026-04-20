@@ -14,6 +14,7 @@ import { poIntakeRoutes } from "../modules/po-intake/routes.js";
 import { shipmentRoutes } from "../modules/shipments/routes.js";
 import { userAdminRoutes } from "../modules/users/routes.js";
 import { dashboardRoutes } from "../modules/dashboard/routes.js";
+import { notificationRoutes } from "../modules/notifications/routes.js";
 
 function buildCorsOptions(): CorsOptions {
   const origins = config.cors.origins;
@@ -55,6 +56,7 @@ export function createApp(): express.Application {
   app.use("/api/v1/health", healthRoutes);
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/v1/users", userAdminRoutes);
+  app.use("/api/v1/notifications", notificationRoutes);
   app.use("/api/v1/po", poIntakeRoutes);
   app.use("/api/v1/shipments", shipmentRoutes);
   app.use("/api/v1/dashboard", dashboardRoutes);

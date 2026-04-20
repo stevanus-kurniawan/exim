@@ -30,7 +30,7 @@ import { Button } from "@/components/forms";
 import { useToast } from "@/components/providers/ToastProvider";
 import { intakeStatusToBadgeVariant, statusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
 import { formatPoStatusLabel } from "@/lib/po-status-label";
-import { formatDecimal } from "@/lib/format-number";
+import { formatDecimal, formatPoUnitPrice } from "@/lib/format-number";
 import { formatPoLineQtyDisplay } from "@/lib/po-line-qty";
 import { formatDateTime, formatDayMonthYear } from "@/lib/format-date";
 import { ActivityLogRibbonIcon } from "@/components/icons/ActivityLogRibbonIcon";
@@ -535,7 +535,7 @@ export function PoDetail({ id }: { id: string }) {
                       )}
                     </TableCell>
                     <TableCell className={styles.tdLeft}>{item.unit ?? "—"}</TableCell>
-                    <TableCell className={styles.tdRight}>{item.value != null ? formatDecimal(item.value) : "—"}</TableCell>
+                    <TableCell className={styles.tdRight}>{item.value != null ? formatPoUnitPrice(item.value) : "—"}</TableCell>
                     <TableCell className={styles.tdRight}>{totalAmt != null ? formatDecimal(totalAmt) : "—"}</TableCell>
                   </TableRow>
                 );
