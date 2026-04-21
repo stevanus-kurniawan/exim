@@ -9,7 +9,7 @@ import { Card } from "@/components/cards";
 import { PageHeader } from "@/components/navigation";
 import { Button, ComboboxSelect } from "@/components/forms";
 import { useToast } from "@/components/providers/ToastProvider";
-import { formatPriceInputWithCommas, roundTo2Decimals } from "@/lib/format-number";
+import { formatPriceInputWithCommas, roundTo2Decimals, roundTo3Decimals } from "@/lib/format-number";
 import { INCOTERM_OPTIONS } from "@/lib/incoterms";
 import { PT_OPTION_LABELS, PO_ITEM_UNIT_OPTIONS, getPlantConfigForPt } from "@/lib/po-create-constants";
 import { isApiError } from "@/types/api";
@@ -222,7 +222,7 @@ export function CreatePo() {
         item_description: it.item_description?.trim() || undefined,
         qty: qty != null ? roundTo2Decimals(qty) : undefined,
         unit: it.unit?.trim() || undefined,
-        value: value != null ? roundTo2Decimals(value) : undefined,
+        value: value != null ? roundTo3Decimals(value) : undefined,
       };
     });
 
@@ -501,7 +501,7 @@ export function CreatePo() {
                               className={`${styles.itemsInput} ${styles.itemsInputPrice}`}
                               value={item.priceText}
                               onChange={(e) =>
-                                updateItem(index, "priceText", formatPriceInputWithCommas(e.target.value, 2))
+                                updateItem(index, "priceText", formatPriceInputWithCommas(e.target.value, 3))
                               }
                               aria-label="Price per unit"
                             />

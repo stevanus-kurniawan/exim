@@ -157,6 +157,17 @@
   align-items: end;
 }
 
+.existingFromPoRef {
+  margin: var(--spacing-2, 8px) 0 0;
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+  font-size: var(--typography-fontSize-small, 14px);
+  line-height: var(--typography-lineHeight-default, 1.45);
+  color: var(--color-primitive-text-steel, #6b6b6b);
+  text-align: center;
+}
+
 .metricsHeaderInner span {
   display: block;
   font-size: var(--typography-fontSize-small, 14px);

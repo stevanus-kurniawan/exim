@@ -45,11 +45,14 @@ import {
 } from "@/components/tables";
 import { Button, ComboboxSelect } from "@/components/forms";
 import { useToast } from "@/components/providers/ToastProvider";
+import { ShipmentNoteMentionTextarea } from "@/components/shipments/ShipmentNoteMentionTextarea";
+import { renderNoteWithMentions } from "@/lib/render-note-mentions";
 import { DutyFormulaInfoIcon } from "@/components/icons/DutyFormulaInfoIcon";
 import { ActivityLogRibbonIcon } from "@/components/icons/ActivityLogRibbonIcon";
 import { statusToBadgeVariant, formatStatusLabel } from "@/lib/status-badge";
 import {
   formatDecimal,
+  formatPoUnitPrice,
   formatPriceInputWithCommas,
   roundTo2Decimals,
   stripCommaThousands,
@@ -396,14 +399,18 @@ function PoLineItemsEditorBlock({
           <TableHead>
             <TableRow>
               <TableHeaderCell className={styles.poItemColDesc}>Items</TableHeaderCell>
-              <TableHeaderCell className={styles.poItemColNum}>Qty</TableHeaderCell>
+              <TableHeaderCell className={styles.poItemColNum}>
+                {canEditPoLineFields ? "PO qty" : "Qty"}
+              </TableHeaderCell>
               <TableHeaderCell className={styles.poItemColRecv}>Qty delivered</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColPct}>BM %</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColPct}>PPN %</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColPct}>PPH %</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColNum}>Remaining qty</TableHeaderCell>
               <TableHeaderCell className={styles.poItemColUnit}>Unit</TableHeaderCell>
-              <TableHeaderCell className={styles.poItemColNum}>Price per unit</TableHeaderCell>
+              <TableHeaderCell className={styles.poItemColNum}>
+                {canEditPoLineFields ? "PO unit price" : "Price per unit"}
+              </TableHeaderCell>
               <TableHeaderCell className={styles.poItemColAmt}>Total amount</TableHeaderCell>
             </TableRow>
           </TableHead>
@@ -502,7 +509,9 @@ function PoLineItemsEditorBlock({
                     {remainingQty != null ? formatPoLineQtyDisplay(remainingQty) : "—"}
                   </TableCell>
                   <TableCell className={styles.poItemColUnit}>{displayPoField(item.unit)}</TableCell>
-                  <TableCell className={styles.poItemColNum}>{item.value != null ? formatDecimal(item.value) : "—"}</TableCell>
+                  <TableCell className={styles.poItemColNum}>
+                    {item.value != null ? `${currencySymbol}${formatPoUnitPrice(item.value)}` : "—"}
+                  </TableCell>
                   <TableCell className={`${styles.poItemColAmt} ${styles.poItemAmtCell}`}>
                     {`${currencySymbol}${formatDecimal(amount)}`}
                   </TableCell>
@@ -4112,13 +4121,15 @@ export function ShipmentDetail({ id }: { id: string }) {
           <form onSubmit={handleAddShipmentNote} className={styles.noteComposer}>
             <label className={styles.field} htmlFor="shipment-note-draft">
               <span className={styles.fieldLabel}>Add a note</span>
-              <textarea
+              <ShipmentNoteMentionTextarea
                 id="shipment-note-draft"
                 className={styles.notesTextarea}
                 value={noteDraft}
-                onChange={(e) => setNoteDraft(e.target.value)}
+                onChange={setNoteDraft}
+                accessToken={accessToken}
                 placeholder="Write a note…"
                 rows={4}
+                disabled={savingNote}
               />
             </label>
             <div className={styles.notesActions}>
@@ -4142,7 +4153,7 @@ export function ShipmentDetail({ id }: { id: string }) {
                     {formatDate(n.created_at)}
                   </time>
                 </div>
-                <p className={styles.noteBody}>{n.note}</p>
+                <p className={styles.noteBody}>{renderNoteWithMentions(n.note)}</p>
               </li>
             ))
           )}

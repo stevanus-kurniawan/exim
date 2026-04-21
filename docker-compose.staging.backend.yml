@@ -43,7 +43,7 @@ services:
     # Bind host NAS mount into the container. Set STORAGE_HOST_MOUNT in .env if the host path differs.
     # backend/.env: STORAGE_LOCAL_PATH or dev composition → e.g. /mnt/synology/eos/dev/EOS (see backend/.env.example).
     volumes:
-      - ${STORAGE_HOST_MOUNT:-/mnt/synology/eos}:/mnt/synology/eos
+      - ${STORAGE_HOST_MOUNT:-/mnt/synology/eos}:/mnt/synology/dev
 
 volumes:
   postgres_data:

@@ -10,9 +10,21 @@ import { PageHeader } from "@/components/navigation";
 import { LoadingSkeleton } from "@/components/feedback";
 import { Button, ComboboxSelect } from "@/components/forms";
 import { useToast } from "@/components/providers/ToastProvider";
-import { formatDecimal, formatPriceInputWithCommas, roundTo2Decimals } from "@/lib/format-number";
+import {
+  formatDecimal,
+  formatPoUnitPrice,
+  formatPriceInputWithCommas,
+  roundTo2Decimals,
+  roundTo3Decimals,
+} from "@/lib/format-number";
+import { formatPoLineQtyDisplay } from "@/lib/po-line-qty";
 import { INCOTERM_OPTIONS } from "@/lib/incoterms";
-import { PT_OPTION_LABELS, PO_ITEM_UNIT_OPTIONS, getPlantConfigForPt } from "@/lib/po-create-constants";
+import {
+  PT_OPTION_LABELS,
+  PO_ITEM_UNIT_OPTIONS,
+  canonicalizePtLabel,
+  getPlantConfigForPt,
+} from "@/lib/po-create-constants";
 import { parseYesNoSelectValue } from "@/lib/yes-no-field";
 import { can } from "@/lib/permissions";
 import { anyLinkedShipmentBlocksPoEdit, PO_EDIT_BLOCKED_BY_SHIPMENT_MESSAGE } from "@/lib/po-shipment-edit-lock";
@@ -38,6 +50,9 @@ type ItemFormLine = {
   qtyText: string;
   unit: string;
   priceText: string;
+  /** Snapshot from API for persisted lines — shown as read-only reference while editing. */
+  savedQty?: number | null;
+  savedPrice?: number | null;
 };
 
 const CURRENCY_OPTIONS = ["USD", "IDR", "EUR", "GBP", "SGD", "JPY", "CNY", "AUD", "MYR", "THB"];
@@ -56,22 +71,45 @@ function parseOptionalDecimal(text: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** API / PG may send qty & unit price as strings — normalize for controlled inputs. */
+function coerceApiNumber(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const t = value.replace(/,/g, "").trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function detailToForm(detail: PoDetailType): EditPoFormState {
-  const pt = detail.pt?.trim() ?? "";
+  const pt = canonicalizePtLabel(detail.pt);
   const pc = pt ? getPlantConfigForPt(pt) : null;
   let plant = detail.plant?.trim() ?? "";
-  if (pc?.mode === "fixed") plant = pc.plant;
+  if (pc?.mode === "fixed") {
+    plant = pc.plant;
+  } else if (pc?.mode === "select" && plant) {
+    const hit = pc.plants.find((p) => p.localeCompare(plant, undefined, { sensitivity: "accent" }) === 0);
+    if (hit) plant = hit;
+  }
 
   const rows =
     detail.items?.length > 0
-      ? detail.items.map((it) => ({
-          lineId: it.id,
-          item_description: it.item_description ?? "",
-          qtyText: it.qty != null && Number.isFinite(it.qty) ? String(it.qty) : "",
-          unit: it.unit?.trim() || "PCS",
-          priceText:
-            it.value != null && Number.isFinite(it.value) ? formatPriceInputWithCommas(String(it.value), 2) : "",
-        }))
+      ? detail.items.map((it) => {
+          const qtyN = coerceApiNumber(it.qty);
+          const valueN = coerceApiNumber(it.value);
+          return {
+            lineId: it.id,
+            item_description: it.item_description ?? "",
+            qtyText: qtyN != null ? String(qtyN) : "",
+            unit: it.unit?.trim() || "PCS",
+            priceText: valueN != null ? formatPriceInputWithCommas(String(valueN), 3) : "",
+            savedQty: qtyN,
+            savedPrice: valueN,
+          };
+        })
       : [initialItem()];
 
   const yn = parseYesNoSelectValue(detail.kawasan_berikat);
@@ -139,16 +177,19 @@ export function PoEdit({ id }: { id: string }) {
   }
 
   function handlePtChange(pt: string) {
-    const config = getPlantConfigForPt(pt);
+    const ptKey = canonicalizePtLabel(pt);
+    const config = ptKey ? getPlantConfigForPt(ptKey) : null;
     setForm((prev) => {
       if (!prev) return prev;
       let plant = "";
       if (config?.mode === "fixed") plant = config.plant;
-      return { ...prev, pt, plant };
+      return { ...prev, pt: ptKey || pt.trim(), plant };
     });
   }
 
-  const plantConfig = form?.pt ? getPlantConfigForPt(form.pt) : null;
+  const ptKey = form?.pt ? canonicalizePtLabel(form.pt) : "";
+  const plantConfig = ptKey ? getPlantConfigForPt(ptKey) : null;
+  const ptInKnownList = form?.pt ? (PT_OPTION_LABELS as readonly string[]).includes(form.pt) : false;
 
   function updateItem<K extends keyof ItemFormLine>(index: number, field: K, value: ItemFormLine[K]) {
     setForm((prev) => {
@@ -203,6 +244,10 @@ export function PoEdit({ id }: { id: string }) {
       setSubmitError("Please select Plant.");
       return;
     }
+    if (!plantConfig && form.pt.trim() && !form.plant?.trim()) {
+      setSubmitError("Plant is required.");
+      return;
+    }
     if (!form.delivery_location?.trim()) {
       setSubmitError("Delivery location is required.");
       return;
@@ -239,7 +284,7 @@ export function PoEdit({ id }: { id: string }) {
       supplier_name: form.supplier_name.trim(),
       delivery_location: form.delivery_location.trim(),
       kawasan_berikat: form.kawasan_berikat,
-      pt: form.pt.trim(),
+      pt: canonicalizePtLabel(form.pt.trim()),
       items: completeItems.map((it) => {
         const qty = parseOptionalDecimal(it.qtyText);
         const value = parseOptionalDecimal(it.priceText);
@@ -247,7 +292,7 @@ export function PoEdit({ id }: { id: string }) {
           item_description: it.item_description?.trim() || "",
           qty: qty != null ? roundTo2Decimals(qty) : 0,
           unit: it.unit?.trim() || "",
-          value: value != null ? roundTo2Decimals(value) : 0,
+          value: value != null ? roundTo3Decimals(value) : 0,
         };
         if (it.lineId) row.id = it.lineId;
         return row;
@@ -333,6 +378,11 @@ export function PoEdit({ id }: { id: string }) {
                 aria-label="PT"
               >
                 <option value="">— Select PT —</option>
+                {form.pt && !ptInKnownList && (
+                  <option value={form.pt}>
+                    {form.pt}
+                  </option>
+                )}
                 {PT_OPTION_LABELS.map((label) => (
                   <option key={label} value={label}>
                     {label}
@@ -378,12 +428,31 @@ export function PoEdit({ id }: { id: string }) {
                   aria-label="Plant"
                 >
                   <option value="">— Select plant —</option>
+                  {form.plant &&
+                    !plantConfig.plants.some(
+                      (p) => p.localeCompare(form.plant ?? "", undefined, { sensitivity: "accent" }) === 0
+                    ) && (
+                      <option value={form.plant}>{form.plant}</option>
+                    )}
                   {plantConfig.plants.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
                   ))}
                 </select>
+              )}
+              {form.pt && !plantConfig && (
+                <input
+                  id="plant"
+                  type="text"
+                  className={styles.formInput}
+                  value={form.plant ?? ""}
+                  onChange={(e) => updateField("plant", e.target.value)}
+                  required
+                  disabled={formDisabled}
+                  placeholder="Plant"
+                  aria-label="Plant"
+                />
               )}
             </div>
             <div className={styles.field}>
@@ -504,9 +573,9 @@ export function PoEdit({ id }: { id: string }) {
                   <th className={styles.itemsTh}>Description</th>
                   <th className={`${styles.itemsTh} ${styles.thMetricsGroup}`} colSpan={3}>
                     <div className={styles.metricsHeaderInner}>
-                      <span>Qty</span>
+                      <span>Order qty</span>
                       <span>Unit</span>
-                      <span>Price per unit</span>
+                      <span>Unit price ({poCurrency})</span>
                     </div>
                   </th>
                   <th className={`${styles.itemsTh} ${styles.itemsThCenter}`}>Total amount</th>
@@ -565,13 +634,28 @@ export function PoEdit({ id }: { id: string }) {
                             className={styles.itemsInput}
                             value={item.priceText}
                             onChange={(e) =>
-                              updateItem(index, "priceText", formatPriceInputWithCommas(e.target.value, 2))
+                              updateItem(index, "priceText", formatPriceInputWithCommas(e.target.value, 3))
                             }
                             placeholder="1,234.56"
                             disabled={formDisabled}
-                            aria-label="Price per unit"
+                            aria-label="Unit price"
                           />
                         </div>
+                        {item.lineId != null &&
+                        (item.savedQty != null || item.savedPrice != null) &&
+                        (Number.isFinite(Number(item.savedQty)) || Number.isFinite(Number(item.savedPrice))) ? (
+                          <p className={styles.existingFromPoRef}>
+                            From PO:{" "}
+                            {item.savedQty != null && Number.isFinite(Number(item.savedQty))
+                              ? formatPoLineQtyDisplay(item.savedQty)
+                              : "—"}
+                            {" qty · "}
+                            {item.savedPrice != null && Number.isFinite(Number(item.savedPrice))
+                              ? formatPoUnitPrice(item.savedPrice)
+                              : "—"}
+                            {` ${poCurrency}/unit`}
+                          </p>
+                        ) : null}
                       </td>
                       <td className={`${styles.itemsTd} ${styles.itemsTdTotal}`}>
                         {total != null ? formatDecimal(total) : "—"}

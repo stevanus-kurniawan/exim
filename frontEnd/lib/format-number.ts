@@ -1,6 +1,6 @@
 /**
- * Format numbers with exactly 2 digits after the decimal point.
- * Use for display only; does not round the underlying value.
+ * Number formatting helpers: display and rounding for money / quantities.
+ * `formatDecimal` uses 2 fraction digits; PO unit prices use `formatPoUnitPrice` (up to 3).
  */
 
 /**
@@ -19,6 +19,24 @@ export function formatDecimal(value: number | null | undefined): string {
  */
 export function roundTo2Decimals(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * Round a number to 3 decimal places (e.g. PO line unit price).
+ */
+export function roundTo3Decimals(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+/**
+ * Format PO unit price for display (up to 3 fraction digits, no unnecessary trailing zeros past the first significant decimal).
+ */
+export function formatPoUnitPrice(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  });
 }
 
 /** Remove thousands separators for parsing. */
