@@ -9,6 +9,9 @@
 #   - EOS_ENV=production
 #
 # Schedule: 15:00 UTC daily (= 22:00 / 10 PM UTC+7). Retention: 14 days (see RETENTION_DAYS).
+#
+# Backups are written on the Linux host at /opt/exim/scripts/backup (bind mount), not in a Docker volume.
+# Create the directory first if you want specific ownership: sudo mkdir -p /opt/exim/scripts/backup
 
 services:
   eos-backup-scheduler:
@@ -26,10 +29,7 @@ services:
       BACKUP_DIR: /backups/eos
       RETENTION_DAYS: "14"
     volumes:
-      - eos_pg_backups:/backups/eos
+      - /opt/exim/scripts/backup:/backups/eos
     depends_on:
       postgres:
         condition: service_healthy
-
-volumes:
-  eos_pg_backups:
