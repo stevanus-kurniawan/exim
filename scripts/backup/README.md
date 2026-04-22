@@ -31,7 +31,7 @@ EOS_BACKUP_ENABLED=true
 EOS_ENV=production
 ```
 
-Backups persist in the **`eos_pg_backups`** volume at `/backups/eos` inside the scheduler container. Scheduler log: `/backups/eos/scheduler.log`.
+With **`docker-compose.backup.yml`**, backups and the scheduler log are stored on the **Linux host** at **`/opt/exim/scripts/backup`** (mounted at `/backups/eos` in the container). Create the directory before first deploy if you need a specific owner: `sudo mkdir -p /opt/exim/scripts/backup`. Files: `eos-*.sql.gz`; log: `scheduler.log`.
 
 **Do not** enable these variables on staging/dev if you rely on the script guard alone.
 
