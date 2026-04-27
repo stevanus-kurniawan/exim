@@ -36,7 +36,6 @@ import {
   type LogisticsNavigateSync,
   type TransportTab,
 } from "@/components/logistics-detail-table";
-import { OrderFulfillmentVariance } from "@/components/order-fulfillment-variance/OrderFulfillmentVariance";
 import { ShipmentPerformanceCard } from "@/components/shipment-performance/ShipmentPerformanceCard";
 import { ScalingFinancialValue } from "@/components/dashboard/ScalingFinancialValue";
 import { DashboardUsdRateBar } from "@/components/dashboard/DashboardUsdRateBar";
@@ -773,7 +772,6 @@ export function DashboardAnalyticsSection() {
                 </button>
               </div>
             </Card>
-            <OrderFulfillmentVariance accessToken={accessToken} allowed={allowed} />
             <Card className={styles.managerialCard}>
               <h3 className={styles.analyticsCardTitle}>Financial visibility</h3>
               <ScalingFinancialValue

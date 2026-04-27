@@ -169,6 +169,8 @@ export function ShipmentList() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [openFilterColumnId, setOpenFilterColumnId] = useState<string | null>(null);
   const [filterOptions, setFilterOptions] = useState<ShipmentListFilterOptions | null>(null);
+  const [sortBy, setSortBy] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const syncSearchToUrl = useCallback(
     (search: string) => {
@@ -240,6 +242,10 @@ export function ShipmentList() {
     if (performanceEtaLate) {
       listQuery.performance_eta_late = true;
     }
+    if (sortBy) {
+      listQuery.sort_by = sortBy;
+      listQuery.sort_dir = sortDir;
+    }
     listShipments(listQuery, accessToken)
       .then((res) => {
         if (isApiError(res)) {
@@ -266,6 +272,8 @@ export function ShipmentList() {
     performanceEtaLate,
     columnFiltersKey,
     statusLabelToRaw,
+    sortBy,
+    sortDir,
   ]);
 
   useEffect(() => {
@@ -362,6 +370,16 @@ export function ShipmentList() {
     setSearchParam(searchInput);
     setPage(1);
     syncSearchToUrl(searchInput);
+  }
+
+  function handleColumnSort(columnId: string) {
+    setPage(1);
+    if (sortBy === columnId) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(columnId);
+      setSortDir("asc");
+    }
   }
 
   function applyPoDateFilter() {
@@ -788,9 +806,24 @@ export function ShipmentList() {
                                 ? styles.plantStickyTh
                                 : undefined
                           }
+                          aria-sort={
+                            sortBy === c.id ? (sortDir === "asc" ? "ascending" : "descending") : undefined
+                          }
                         >
                           <div className={styles.headerCellFilter}>
-                            <span>{c.label}</span>
+                            <button
+                              type="button"
+                              className={styles.sortHeadBtn}
+                              onClick={() => handleColumnSort(c.id)}
+                              aria-label={`Sort by ${c.label}${sortBy === c.id ? `, ${sortDir === "asc" ? "ascending" : "descending"}` : ""}`}
+                            >
+                              <span>{c.label}</span>
+                              {sortBy === c.id ? (
+                                <span className={styles.sortIndicator} aria-hidden>
+                                  {sortDir === "asc" ? "↑" : "↓"}
+                                </span>
+                              ) : null}
+                            </button>
                             <TableColumnFilterPicker
                               columnLabel={c.label}
                               options={opts}
