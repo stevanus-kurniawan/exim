@@ -44,6 +44,8 @@ function buildQueryString(query: ListPoQuery): string {
   query.taken_at_dates?.forEach((v) => params.append("taken_at_date", v));
   query.created_at_dates?.forEach((v) => params.append("created_at_date", v));
   query.updated_at_dates?.forEach((v) => params.append("updated_at_date", v));
+  if (query.sort_by) params.set("sort_by", query.sort_by);
+  if (query.sort_dir) params.set("sort_dir", query.sort_dir);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

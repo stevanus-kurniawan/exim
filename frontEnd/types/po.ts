@@ -50,6 +50,9 @@ export interface ListPoQuery {
   taken_at_dates?: string[];
   created_at_dates?: string[];
   updated_at_dates?: string[];
+  /** Table column id; backend maps to SQL. */
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 /** GET /po/list-filter-options */
@@ -79,6 +82,8 @@ export interface ListPoMeta {
 
 export interface PoItemSummary {
   id: string;
+  /** FK to import PO header (`import_purchase_order.id`); same as parent PO detail `id`. */
+  import_purchase_order_id: string;
   line_number: number;
   item_description: string | null;
   qty: number | null;

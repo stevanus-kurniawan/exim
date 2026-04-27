@@ -9,6 +9,12 @@ import { createServer } from "./server.js";
 import { logger } from "./utils/logger.js";
 import { PoIntakeRepository } from "./modules/po-intake/repositories/po-intake.repository.js";
 import { createPoApiClient, startPoPolling } from "./integration/saaS/index.js";
+import {
+  CoupaPoApiClient,
+  PurchaseOrderStagingRepository,
+  startCoupaStagingIntegration,
+  stopCoupaStagingIntegration,
+} from "./integration/coupa/index.js";
 
 async function main(): Promise<void> {
   try {
@@ -26,6 +32,27 @@ async function main(): Promise<void> {
     const client = createPoApiClient(config.poPolling.saasApiBaseUrl);
     startPoPolling(repo, client, config.poPolling.intervalMs);
   }
+
+  if (config.coupa.enabled) {
+    const coupa = CoupaPoApiClient.fromConfig({
+      baseUrl: config.coupa.baseUrl,
+      issuedListPathOrUrl: config.coupa.issuedListPathOrUrl,
+      accessToken: config.coupa.accessToken,
+      clientId: config.coupa.clientId,
+      clientSecret: config.coupa.clientSecret,
+      oauthTokenUrl: config.coupa.oauthTokenUrl,
+      oauthScope: config.coupa.oauthScope,
+      requestTimeoutMs: config.coupa.requestTimeoutMs,
+    });
+    startCoupaStagingIntegration(
+      {
+        stagingRepo: new PurchaseOrderStagingRepository(),
+        poRepo: new PoIntakeRepository(),
+        coupa,
+      },
+      { ingestMs: config.coupa.ingestIntervalMs, processorMs: config.coupa.processorIntervalMs }
+    );
+  }
 }
 
 main().catch((err) => {
@@ -37,6 +64,7 @@ process.on("SIGTERM", async () => {
   logger.info("SIGTERM received, stopping polling and closing DB");
   const { stopPoPolling } = await import("./integration/saaS/index.js");
   stopPoPolling();
+  stopCoupaStagingIntegration();
   await closeDb();
   process.exit(0);
 });
