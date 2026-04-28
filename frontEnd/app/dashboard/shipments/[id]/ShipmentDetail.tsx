@@ -1421,8 +1421,25 @@ export function ShipmentDetail({ id }: { id: string }) {
     if (!accessToken || !id) return;
     const base = config.apiBaseUrl.replace(/\/$/, "");
     const url = `${base}/shipments/${id}/documents/${doc.id}/download`;
-    fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
-      .then((r) => {
+    const downloadWithAuth = () =>
+      fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
+      });
+
+    downloadWithAuth()
+      .then(async (r) => {
+        if (r.status === 401) {
+          const refreshUrl = `${base}/auth/refresh`;
+          const refresh = await fetch(refreshUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+            credentials: "include",
+          });
+          if (!refresh.ok) throw new Error("download failed");
+          r = await downloadWithAuth();
+        }
         if (!r.ok) throw new Error("download failed");
         return r.blob();
       })
