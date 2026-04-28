@@ -1418,12 +1418,11 @@ export function ShipmentDetail({ id }: { id: string }) {
   }
 
   function handleShipmentDocumentDownload(doc: ShipmentDocumentListItem) {
-    if (!accessToken || !id) return;
+    if (!id) return;
     const base = config.apiBaseUrl.replace(/\/$/, "");
     const url = `${base}/shipments/${id}/documents/${doc.id}/download`;
     const downloadWithAuth = () =>
       fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
         credentials: "include",
       });
 
